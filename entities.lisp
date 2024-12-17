@@ -112,6 +112,10 @@
    (closed?     :uncached nil)
    (periodic?   :uncached nil)))
 
+(defmethod centroidish ((self 2d-line-mixin))
+  (let ((mid (the mid)))
+    (vec3 (vx mid) (vy mid) 0.0d0)))
+
 (defmethod evaluate1 ((self 2d-line-mixin) (parameter real) &key (derivs 0))
   (let ((p (v+ (the start) (v* parameter (the span)))))
     (cond ((= derivs 1) (values p (the direction)))
@@ -328,6 +332,9 @@
    (closed?     :uncached nil)
    (periodic?   :uncached nil)))
 
+(defmethod centroidish ((self 3d-line-mixin))
+  (the mid))
+
 (defmethod to-opencascade ((self 3d-line-mixin))
   (let* ((start (the start))
 	 (end   (the end))
@@ -541,6 +548,10 @@
    (periodic?   :uncached t)
    (length      :uncached (* 2pi (the radius)))))
 
+(defmethod centroidish ((self circle-mixin))
+  (let ((c (the center)))
+    (vec3 (vx c) (vy c) 0.0d0)))
+
 (defmethod rm-draw-node ((self circle-mixin))
   (when (the visible?)
     (let* ((scene  (the krma:scene))
@@ -650,6 +661,10 @@
 				 (let ((h (the h)))
 				   (loop for n from 0 below 10
 					 sum (* (binomial-coefficient-0.5 n) (expt h n))))))))
+
+(defmethod centroidish ((self ellipse-mixin))
+  (let ((c (the center)))
+    (vec3 (vx c) (vy c) 0.0d0)))
 
 (defclass ellipse ()
   ()
@@ -779,6 +794,15 @@
 		       (if (eq (the orientation) :ccw)
 			   (list (mod start 2pi) (+ (mod start 2pi) (the delta-angle)))
 			   (list (+ (mod start 2pi) (the delta-angle)) (mod start 2pi)))))))
+
+(defmethod centroidish ((self arc-mixin))
+  (let* ((c (the center))
+	 (val (v* (the radius) (vec3 (- (sin (the end-angle)) (sin (the start-angle)))
+				     (- (cos (the start-angle)) (cos (the end-angle)))
+				     0.0d0))))
+    (if (eq (the orientation) :ccw)
+	(v+ (vec3 (vx c) (vy c) 0.0d0) val)
+	(v- (vec3 (vx c) (vy c) 0.0d0) val))))
 
 (defmethod to-opencascade ((self arc-mixin))
   (let* ((start (the start))
@@ -1021,6 +1045,13 @@
 			   (loop for cpoint across cpoints
 				 always (= (vw cpoint) 1.0d0)))))))
 
+(defmethod centroidish ((self bezier-space-curve-mixin))
+  (let ((cpoints (the control-points)))
+    (loop for cp across cpoints
+	  with sum = (vec3 0 0 0)
+	  do (setq sum (v+ sum (vec3 (vx cp) (vy cp) (vz cp))))
+	  finally (return (v/ sum (length cpoints))))))
+
 (declaim (ftype (function (fixnum double-float) (#-allegro simple-array #+allegro array double-float)) bernstein))
 (defun bernstein (n u)
   (declare (type fixnum n) (type double-float u))
@@ -1059,6 +1090,13 @@
 			  (not
 			   (loop for cpoint across cpoints
 				 always (= (vz cpoint) 1.0d0)))))))
+
+(defmethod centroidish ((self bezier-plane-curve-mixin))
+  (let ((cpoints (the control-points)))
+    (loop for cp across cpoints
+	  with sum = (vec3 0 0 0)
+	  do (setq sum (v+ sum (vec3 (vx cp) (vy cp) 0.0d0)))
+	  finally (return (v/ sum (length cpoints))))))
 
 (defmethod evaluate1 ((self bezier-plane-curve-mixin) (parameter real) &key (derivs 0))
   (declare (ignorable derivs))
@@ -1219,6 +1257,13 @@
 						(vec4 (* w (vx cp)) (* w (vy cp)) (* w (vz cp)) w))
 				    (the control-points)
 				    (the weights)))))
+
+(defmethod centroidish ((self b-spline-space-curve-mixin))
+  (let ((cpoints (the control-points)))
+    (loop for cp across cpoints
+	  with sum = (vec3 0 0 0)
+	  do (setq sum (v+ sum (vec3 (vx cp) (vy cp) (vz cp))))
+	  finally (return (v/ sum (length cpoints))))))
 
 (defmethod to-opencascade ((self b-spline-space-curve-mixin))
   (let* ((hcpoints (the homogeneous-control-points))
@@ -1409,6 +1454,13 @@
 						(vec3 (* w (vx cp)) (* w (vy cp)) w))
 				    (the control-points)
 				    (the weights)))))
+
+(defmethod centroidish ((self b-spline-plane-curve-mixin))
+  (let ((cpoints (the control-points)))
+    (loop for cp across cpoints
+	  with sum = (vec3 0 0 0)
+	  do (setq sum (v+ sum (vec3 (vx cp) (vy cp) 0.0d0)))
+	  finally (return (v/ sum (length cpoints))))))
 
 (defmethod to-opencascade ((self b-spline-plane-curve-mixin))
   (let* ((hcpoints (the homogeneous-control-points))
@@ -2053,7 +2105,75 @@
   :inputs
   ((color #xffff)
    (material krma::*default-material*)
-   (show-edges? nil)))
+   (show-edges? nil))
+
+  :attributes
+  ((oc-gprops (let ((GProps (oc::_wrap_new_GProp_GProps__SWIG_0)))
+		(oc::_wrap_BRepGProp_VolumeProperties__SWIG_0 (oc::ff-pointer (the body)) GProps nil)
+		GProps))
+   (centroid :uncached (let ((gp-pnt (oc::_wrap_GProp_GProps_CentreOfMass (the oc-gprops))))
+			 (prog1 (vec3 (cffi:mem-aref gp-pnt :double 0)
+				      (cffi:mem-aref gp-pnt :double 1)
+				      (cffi:mem-aref gp-pnt :double 2))
+			   (oc::_wrap_delete_gp_pnt gp-pnt))))
+   (mass :uncached (oc::_wrap_GProp_GProps_Mass (the oc-gprops)))))
+
+(defmethod centroidish ((thing oc::topods-face))
+  (let ((gprops (oc::_wrap_new_GProp_GProps__SWIG_0)))
+    (oc::_wrap_BRepGProp_SurfaceProperties__SWIG_0 (oc::ff-pointer thing) gprops)
+    (let ((gp-pnt (oc::_wrap_GProp_GProps_CentreOfMass gprops)))
+      (prog1 (vec3 (cffi:mem-aref gp-pnt :double 0)
+		   (cffi:mem-aref gp-pnt :double 1)
+		   (cffi:mem-aref gp-pnt :double 2))
+	(oc::_wrap_delete_gp_pnt gp-pnt)))))
+
+(defmethod area ((thing oc::topods-face))
+  (let ((gprops (oc::_wrap_new_GProp_GProps__SWIG_0)))
+    (oc::_wrap_BRepGProp_SurfaceProperties__SWIG_0 (oc::ff-pointer thing) gprops)
+    (oc::_wrap_GProp_GProps_Mass gprops)))
+
+(defmethod centroidish ((thing oc::topods-compound))
+  (let ((gprops (oc::_wrap_new_GProp_GProps__SWIG_0)))
+    (oc::_wrap_BRepGProp_VolumeProperties__SWIG_0 (oc::ff-pointer thing) gprops nil)
+    (let ((gp-pnt (oc::_wrap_GProp_GProps_CentreOfMass gprops)))
+      (prog1 (vec3 (cffi:mem-aref gp-pnt :double 0)
+		   (cffi:mem-aref gp-pnt :double 1)
+		   (cffi:mem-aref gp-pnt :double 2))
+	(oc::_wrap_delete_gp_pnt gp-pnt)))))
+
+(defmethod centroidish ((thing oc::topods-solid))
+  (let ((gprops (oc::_wrap_new_GProp_GProps__SWIG_0)))
+    (oc::_wrap_BRepGProp_VolumeProperties__SWIG_0 (oc::ff-pointer thing) gprops nil)
+    (let ((gp-pnt (oc::_wrap_GProp_GProps_CentreOfMass gprops)))
+      (prog1 (vec3 (cffi:mem-aref gp-pnt :double 0)
+		   (cffi:mem-aref gp-pnt :double 1)
+		   (cffi:mem-aref gp-pnt :double 2))
+	(oc::_wrap_delete_gp_pnt gp-pnt)))))
+
+(defmethod centroidish ((thing oc::topods-shell))
+  (let ((gprops (oc::_wrap_new_GProp_GProps__SWIG_0)))
+    (oc::_wrap_BRepGProp_VolumeProperties__SWIG_0 (oc::ff-pointer thing) gprops nil)
+    (let ((gp-pnt (oc::_wrap_GProp_GProps_CentreOfMass gprops)))
+      (prog1 (vec3 (cffi:mem-aref gp-pnt :double 0)
+		   (cffi:mem-aref gp-pnt :double 1)
+		   (cffi:mem-aref gp-pnt :double 2))
+	(oc::_wrap_delete_gp_pnt gp-pnt)))))
+
+(defun selection-set-centroid (application-frame)
+  (let ((ss (send application-frame climish::selection-set)))
+    (if ss
+	(let ((entities (map 'vector #'car ss)))
+	  (loop for entity across entities
+		with sum = (vec3 0 0 0)
+		do (setq sum (v+ sum (if (typep entity 'node-mixin)
+					 (transform-coordinate-from-to (centroidish entity) entity nil)
+					 (centroidish entity))))
+		finally (return (v/ sum (length entities)))))
+	(vec3 0 0 0))))
+    
+    
+  
+
 
 (defmethod rm-draw-node ((self solid-mixin))
   (when (the visible?)
