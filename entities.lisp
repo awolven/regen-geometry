@@ -64,14 +64,17 @@
 	      (binomial-coefficient (1- n) k)))))
 
 (defobject entity-mixin (selectable-mixin node-mixin)
-
-  :inputs
-  ((krma:scene :defaulting (krma:default-scene))
-   
-   (group :defaulting :default))
+;;
+;;  :inputs
+;;  ((krma:scene :defaulting (krma:default-scene))
+;;   
+;;   (group :defaulting :default))
 
   :attributes
-  ((origin :uncached (if (the superior)
+  (#+NIL(krma:scene :uncached (the superior krma:scene))
+   (group :uncached (the superior group))
+
+   (origin :uncached (if (the superior)
 			 (the superior origin)
 			 (vec3 0 0 0)))
    
@@ -2105,7 +2108,7 @@
   :inputs
   ((color #xffff)
    (material krma::*default-material*)
-   (show-edges? nil))
+   (show-edges? t))
 
   :attributes
   ((oc-gprops (let ((GProps (oc::_wrap_new_GProp_GProps__SWIG_0)))
@@ -2187,9 +2190,13 @@
   (values))
 
 (defmethod rm-erase-node ((self solid-mixin))
-  (rm-erase-solid self
-		  (the krma:scene)
-		  (the body))
+  (let ((basket (adhoc::slot-value-internal self 'body)))
+    ;; don't regenerate body if it's already gone or was never there.
+    (unless (eq basket adhoc::+slot-unbound+)
+      (when (slot-boundp basket 'adhoc::value)
+	(rm-erase-solid self
+			(the krma:scene)
+			(slot-value basket 'adhoc::value)))))
   (values))
 
 (defmethod rm-erase-solid ((self solid-mixin)
@@ -2332,14 +2339,31 @@
 						 :isRelative t
 						 :isInParallel t))
 			  &allow-other-keys)
-  (mapcar #'(lambda (shape)
-	      (rm-draw-solid self scene shape
-			     :group group
-			     :color color
-			     :material material
-			     :show-edges? show-edges?
-			     :mesh mesh))
-	  (topods-children shape))
+  (let ((faces (topods-children shape)))
+    (mapcar #'(lambda (shape)
+		(rm-draw-solid self scene shape
+			       :group group
+			       :color color
+			       :material material
+			       :mesh mesh))
+	    faces)
+    (when show-edges?
+      (let ((face-edges (mapcar #'(lambda (face)
+				    (let ((wires (topods-children face)))
+				      (apply #'append (mapcar #'topods-children wires))))
+				faces)))
+	(let ((exp (make-instance 'oc::top-exp-explorer
+				  :S shape
+				  :ToFind :topabs_edge)))
+	  (loop while (oc::more-p exp)
+		do (let* ((edge (oc::current exp))
+			  (face (nth (position edge face-edges :test #'member) faces)))
+		     (rm-draw-solid self scene edge
+				    :face face
+				    :group group
+				    :color #x000000ff
+				    :mesh mesh))
+		   (oc::next exp))))))			      
   (values))
 
 (defmethod rm-draw-solid ((self solid-mixin)
@@ -2353,6 +2377,50 @@
   (push (krma::scene-add-diffuse-opencascade-face scene group nil color material shape)
 	(send shape climish::primitive-handles))
   (values))
+
+(defmethod rm-draw-solid ((self solid-mixin)
+			  (scene krma:krma-essential-scene-mixin)
+			  (shape oc::topods-edge)
+			  &key (group :default)
+			    (color #x000000ff)
+			    face
+			  &allow-other-keys)
+  (when face
+    (push (krma::scene-add-opencascade-edge scene group nil color shape face)
+	  (send shape climish::primitive-handles)))
+  (values))
+
+krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge face)
+	(declare (type krma-essential-scene-mixin scene))
+	(declare (type (and atom t) group))
+	(declare (type oc::topods-edge edge))
+	(declare (type oc::topods-face face))
+	(declare (type (or mat4 null) model-matrix))
+	(let ((vertices (let* ((hpt (rgn-geo::oc-face-triangulation face))
+			       (hpolygon (oc::_wrap_BRep_Tool_PolygonOnTriangulation__SWIG_0
+					  (oc::ff-pointer edge)
+					  hpt
+					  (oc::_wrap_new_TopLoc_Location__SWIG_0)))
+			       (polygon (cffi::mem-aref hpolygon :pointer))
+			       (nodes (oc::_wrap_Poly_PolygonOnTriangulation_Nodes polygon))
+			       (lower (OC::_WRAP_TCOLSTD_ARRAY1OFINTEGER_LOWER nodes))
+			       (upper (OC::_WRAP_TCOLSTD_ARRAY1OFINTEGER_Upper nodes))
+			       (pt (cffi::mem-aref hpt :pointer))
+			       (coordinates (oc::poly_triangulation_node_array_pointer pt))
+			       (clower (oc::poly_triangulation_node_array_lower pt)))
+			  (loop for i from lower to upper
+				nconc (let* ((index (oc::_wrap_TColStd_Array1OfInteger_value nodes i))
+					     (offset (* 3 (- index clower))))
+					(list
+					 (clampf (cffi:mem-aref coordinates :double offset))
+					 (clampf (cffi:mem-aref coordinates :double (1+ offset)))
+					 (clampf (cffi:mem-aref coordinates :double (+ 2 offset))))))))
+		
+	      (ub32-oid (oc::_wrap_topods_shape_hashcode (oc::ff-pointer edge)
+							 (load-time-value (1- (expt 2 31))))))
+	  (scene-add-filled-3d-instanced-tube-primitive
+	   scene group model-matrix nil 2 color vertices ub32-oid)))
+
 
 krma::(defun scene-add-diffuse-opencascade-face (scene group model-matrix color material face)
 	(declare (type krma-essential-scene-mixin scene))
@@ -2457,6 +2525,9 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 (defclass oc::topods-face (oc::topods-shape)
   ((triangulation :initform nil)
    (climish::primitive-handles :initform nil)))
+
+(defclass oc::topods-edge (oc::topods-shape)
+  ((climish::primitive-handles :initform nil)))
 
 (defun oc-face-triangulation (topods-face)
   (let ((triangulation (slot-value topods-face 'triangulation)))
@@ -2683,8 +2754,6 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 
     #+NIL(setq p (map 'vector #'(lambda (rat) (* rat gcd)) p))
 
-    (print p)
-	
     (flet ((evaluate-polynomial (p x)
 	     (loop for i from 0 below (length p)
 		   sum (* (aref p i) (expt x i))))
@@ -2728,9 +2797,6 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 
 	   (setq s (descartes-rule-of-signs p))
 
-	   (print s)
-	   (print p)
-
 	   (when (zerop s)
 	     (return-from isolate-roots-vas-cf nil))
 	
@@ -2747,8 +2813,6 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 
 	 step-3
 	   (setq alpha (/ (cauchy-bound p)))
-
-	   (print alpha)
 
 	 step-4
 
@@ -2795,14 +2859,9 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 	       (setq p1 (subseq p1 1))
 	       (setq r 1)))
 
-	   (print p1)
 	   (setq s1 (descartes-rule-of-signs p1))
-	   (print 's1)
-	   (print s1)
 
 	   (setq s2 (- s s1 r))  ;; (- s s1 r) ;;typo?
-	   (print 'r)
-	   (print r)
 
 	   (setq a2 b)
 	   (setq b2 (+ a b))
@@ -2810,8 +2869,6 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 	   (setq d2 (+ c d))
 
 	 step-7
-	   (print 's2)
-	   (print s2)
 
 	   (when (> s2 1)
 	     (setq p2 (transform-polynomial (reverse p) 1 2))
@@ -3017,17 +3074,17 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 
 (defobject dial-fixture (block-mixin)
   :inputs
-  ((center (vec2 0 0))
-   (inner-radius 13)
-   (shelf-radius 14.5)
-   (outer-radius 15.26)
-   (thickness 0.5)
-   (shelf-thickness 0.0625)
-   (position-holes-radius (+ (the inner-radius) 0.5))
-   (slot-feature-radius 15.005)
-   (slot-feature-diameter 0.53)
-   (slot-feature-angular-spacing (d2r 4.5))
-   (number-of-features 10))
+  ((center :visual (vec2 0 0))
+   (inner-radius :visual 13)
+   (shelf-radius :visual 14.5)
+   (outer-radius :visual 15.26)
+   (thickness :visual 0.5)
+   (shelf-thickness :visual 0.0625)
+   (position-holes-radius :visual (+ (the inner-radius) 0.5))
+   (slot-feature-radius :visual 15.005)
+   (slot-feature-diameter :visual 0.53)
+   (slot-feature-angular-spacing :visual (d2r 4.5))
+   (number-of-features :visual 10))
 
   :attributes
   ((start-angle 0.0d0)
@@ -3237,7 +3294,7 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 	  profile (the profile)
 	  vector (vec3 0 0 (the thickness)))))
 		    
-   
+(defvar df)   
   
 		   
    
@@ -3322,7 +3379,7 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 		  (and (coplanar-points? pt1 pt2 pt3 pt4)
 		       (coplanar-points? pt1 pt2 pt3 pt5))))
 	    (if coplanar?
-		(values t (plane-rotation-matrix pt1 pt2 pt3) lca)
+		(values t (plane-rotation-matrix2 pt1 pt2 pt3) lca)
 		(values nil nil lca))))))))
 
 (defmethod coplanar? ((line-1 line-mixin) (line-2 line-mixin))
@@ -3334,11 +3391,11 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
       (multiple-value-bind (pt1 pt2) (ax1-points ax1-1)
 	(multiple-value-bind (pt3 pt4) (ax1-points ax1-2)
 	  (if (coplanar-points? pt1 pt2 pt3 pt4)
-	      (values t (plane-rotation-matrix pt1 pt2 pt3) lca)
+	      (values t (plane-rotation-matrix2 pt1 pt2 pt3) lca)
 	      (values nil nil lca)))))))
 
 (defun plane-rotation-matrix (pt1 pt2 pt3)
-  (let* ((normal (vc (v- pt2 pt1) (v- pt3 pt1)))
+  (let* ((normal (vunit (vc (v- pt2 pt1) (v- pt3 pt1))))
 	 (theta (let ((th (acos (vz normal))))
 		  (* (signum (realpart th)) (abs th))))
 	 (rotation (vc normal (vec3 0 0 1)))
@@ -3351,6 +3408,16 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 	 (m3 (scalar-times-matrix (- 1 (cos theta)) (m* skew-symmetric skew-symmetric))))
     
     (binary-m+ m1 (binary-m+ m2 m3))))
+
+(defun plane-rotation-matrix2 (pt1 pt2 pt3)
+  (let* ((x-axis (vunit (v- pt2 pt1)))
+	 (y-axis (vunit (v- pt3 pt1)))
+	 (z-axis (vc x-axis y-axis)))
+    (minv (mat4 (vx x-axis) (vx y-axis) (vx z-axis) 0
+		(vy x-axis) (vy y-axis) (vy z-axis) 0
+		(vz x-axis) (vz y-axis) (vz z-axis) 0
+		0 0 0 1))))
+	
   
 
 
@@ -3384,7 +3451,7 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 		(and (coplanar-points? center pt2 pt3 start)
 		     (coplanar-points? center pt2 pt3 end))))
 	  (if coplanar?
-	      (let ((matrix (plane-rotation-matrix center pt2 pt3)))
+	      (let ((matrix (plane-rotation-matrix2 center pt2 pt3)))
 		(setq center (safe-euclid (m* (vec4 (vx center) (vy center) (vz center) 1.0d0) matrix)))
 		(setq pt2    (safe-euclid (m* (vec4 (vx pt2)    (vy pt2)    (vx pt2)    1.0d0) matrix)))
 		(setq start  (safe-euclid (m* (vec4 (vx start)  (vy start)  (vz start)  1.0d0) matrix)))
@@ -3408,8 +3475,6 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 		       (points (mapcar #'(lambda (root) (lerp start end root))
 				       roots)))
 		  ;;(remove-if-not #'(lambda (root) (<= 0.0d0 root 1.0d0)) roots)
-		  (print radius)
-		  (print (send circle radius))
 		  (when points
 		    (let ((inverse (minv matrix)))
 		      (make-intersection
@@ -3431,7 +3496,7 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 		(and (coplanar-points? center pt2 pt3 start)
 		     (coplanar-points? center pt2 pt3 end))))
 	  (if coplanar?
-	      (let ((matrix (plane-rotation-matrix center pt2 pt3)))
+	      (let ((matrix (plane-rotation-matrix2 center pt2 pt3)))
 		(setq center (safe-euclid (m* (vec4 (vx center) (vy center) (vz center) 1.0d0) matrix)))
 		(setq pt2    (safe-euclid (m* (vec4 (vx pt2)    (vy pt2)    (vx pt2)    1.0d0) matrix)))
 		(setq start  (safe-euclid (m* (vec4 (vx start)  (vy start)  (vz start)  1.0d0) matrix)))
@@ -3467,7 +3532,6 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 		    ;; isn't it invariant under transformation?
 		    (let ((end-angle (send arc end-angle))
 			  (start-angle (send arc start-angle)))
-		      (print points)
 		    (setq points
 			  (remove-if #'null
 				     (mapcar #'(lambda (point)
@@ -3503,7 +3567,7 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
     (multiple-value-bind (start-a end-a) (ax1-points ax1-a)
       (multiple-value-bind (start-b end-b) (ax1-points ax1-b)
 	(when (coplanar-points? start-a end-a start-b end-b)
-	  (let ((matrix (plane-rotation-matrix start-a end-a start-b)))
+	  (let ((matrix (plane-rotation-matrix2 start-a end-a start-b)))
 	    (setq start-a (safe-euclid (m* (vec4 (vx start-a) (vy start-a) (vz start-a) 1.0d0) matrix)))
 	    (setq end-a   (safe-euclid (m* (vec4 (vx end-a)   (vy end-a)   (vz end-a)   1.0d0) matrix)))
 	    (setq start-b (safe-euclid (m* (vec4 (vx start-b) (vy start-b) (vz start-b) 1.0d0) matrix)))
@@ -3584,5 +3648,349 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 	  (* scalar (mref 2 0)) (* scalar (mref 2 1)) (* scalar (mref 2 2)) (* scalar (mref 2 3))
 	  (* scalar (mref 3 0)) (* scalar (mref 3 1)) (* scalar (mref 3 2)) (* scalar (mref 3 3)))))
 
-					  
+(defobject 3d-circlish-mixin ())				  
+
+(defobject 3d-arc-mixin (3d-circlish-mixin))
+
+(defobject 3d-arc-mixin1 (3d-arc-mixin)
+  :inputs
+  ((start)
+   (interior)
+   (end))
+  
+  :attributes
+  ((plane-x-axis (vunit (v- (the start) (the interior))))
+   (%plane-y-ish-axis (vunit (v- (the end) (the interior))))
+   (normal (vc (the plane-x-axis) (the %plane-y-ish-axis)))
+   (plane-y-axis (vc (the plane-x-axis) (the normal)))
+   (%plane-rotation-matrix
+    (let ((x-axis (the plane-x-axis))
+	  (y-axis (the plane-y-axis))
+	  (z-axis (the normal)))
+      (mat4 (vx x-axis) (vx y-axis) (vx z-axis) 0
+	    (vy x-axis) (vy y-axis) (vy z-axis) 0
+	    (vz x-axis) (vz y-axis) (vz z-axis) 0
+	    0 0 0 1)))
+   (%inv-plane-rotation-matrix (minv (the %plane-rotation-matrix)))
+   (%start (let* ((p (the start)))
+	     (safe-euclid (m* (the %inv-plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))
+   (%interior (let* ((p (the interior)))
+		(safe-euclid (m* (the %inv-plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))
+   (%end (let* ((p (the end)))
+	   (safe-euclid (m* (the %inv-plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))
+   (%center-radius-degenerate
+    (multiple-value-list (%circle-from-3pts (the %start) (the %interior) (the %end))))
+   (%z (vz (the %start)))
+   (%center (let ((p (first (the %center-radius-degenerate))))
+	      (vec3 (vx p) (vy p) (the %z))))
+   (radius (second (the %center-radius-degenerate)))
+   (degenerate? (third (the %center-radius-degenerate)))
+   (center (let ((p (the %center)))
+	     (safe-euclid (m* (the %plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))
+   (%center-to-end (v- (the %end) (the %center)))
+   (%center-to-start (v- (the %start) (the %center)))
+   (start-angle (let* ((dir (the %center-to-start)))
+		   (atan (vy dir) (vx dir))))
+   (end-angle (let* ((dir (the %center-to-end)))
+		 (atan (vy dir) (vx dir))))
+   (delta-angle (let* ((start-angle (the start-angle))
+		       (end-angle (the end-angle))
+		       (a (- end-angle start-angle)))
+		  (if (< a 0.0d0)
+		      (+ a 2pi)
+		      a)))
+   (orientation :uncached (if (plusp (vz (vc (v- (the %interior) (the %start))
+					     (v- (the %interior) (the %end)))))
+				     :ccw
+				     :cw))
+   (domain :uncached (list (the start-angle) (the end-angle)))))
+
+(defmethod evaluate1 ((self 3d-circlish-mixin) (parameter real) &key (derivs 0))
+  (declare (ignorable derivs))
+  (let* ((center (the %center))
+	 (radius (the radius))
+	 (z (the %z))
+	 (matrix (the %plane-rotation-matrix))
+	 (point (safe-euclid
+		 (m* matrix (vec4 (+ (vx center) (* radius (cos parameter)))
+				  (+ (vy center) (* radius (sin parameter)))
+				  z
+				  1.0d0)))))
+    (cond ((= derivs 0) point)
+	  ((= derivs 1)
+	   (values point (safe-euclid
+			  (m* matrix (vec4 (- (sin parameter))
+					   (cos parameter)
+					   0.0d0
+					   1.0d0)))))
+	  ((> derivs 1)
+	   (values point
+		   (safe-euclid
+		    (m* matrix (vec4 (- (sin parameter))
+				     (cos parameter)
+				     0.0d0
+				     1.0d0)))
+		   (safe-euclid
+		    (m* matrix (vec4 (- (cos parameter))
+				     (- (sin parameter))
+				     0.0d0
+				     1.0d0))))))))
+
+	  
+  
+
+(defobject 3d-arc_a (3d-arc-mixin1 entity-mixin))
+
+(defmethod rm-draw-node ((self 3d-arc-mixin))
+  (when (the visible?)
+    (let* ((scene  (the krma:scene))
+	   (center (the %center))
+	   (z (the %z))
+	   (radius (the radius))
+	   (delta-theta (the delta-angle))
+	   (sign (signum delta-theta))
+	   (niter (floor (abs (/ (* delta-theta 180.0d0) pi))))
+	   (matrix (the %plane-rotation-matrix))
+	   (oid    (the object-id))
+	   (verts (make-array niter))
+	   (start-angle (the start-angle)))
+      (loop for i from 0 below niter
+	    with theta = (the end-angle)
+	    with step = #.(/ pi 180.0d0)
+	    do (let ((angle (- theta (* sign i step))))
+		 (setf (aref verts i)
+		       (safe-euclid
+			(m* matrix (vec4 (+ (vx center) (* radius (cos angle)))
+					 (+ (vy center) (* radius (sin angle)))
+					 z
+					 1.0d0))))))
+      (push (krma:scene-add-filled-3d-instanced-tube-primitive
+	     scene (the group) nil nil 2.5f0 #xff
+	     (nconc
+	      (let ((start (safe-euclid
+			    (m* matrix (vec4 (+ (vx center) (* radius (cos start-angle)))
+					     (+ (vy center) (* radius (sin start-angle)))
+					     z
+					     1.0d0)))))
+		(list (vx start) (vy start) (vz start)))
+	      (loop for coord across verts
+		    with vertices = ()
+		    do (setq vertices (cons (vx coord) (cons (vy coord) (cons (vz coord) vertices))))
+		    finally (return vertices)))
+	     oid)
+	    (the primitive-handles))
+      (setf (krma:object-from-id oid) self)))
+  (values))
+
+(defobject 3d-circle-mixin (3d-circlish-mixin)
+  :inputs
+  ((center (:validator (assure-double-vec3 value)))
+   (normal (:validator (let ((n (assure-double-vec3 value)))
+			 (vunit n))))
+   (radius (:validator (assure-nonnegative-double-float value))))
+
+  :attributes
+  ((plane-x-axis (let ((un (the normal)))
+		   (if (within-tolerance 1.0d0 (v. un (vec3 0 1 0)) 0.1d0)
+		       (vunit (vc un (vec3 0 0 1)))
+		       (vunit (vc (vec3 0 1 0) un)))))
+   (plane-y-axis (vunit (vc (the normal) (the plane-x-axis))))
+   (%plane-rotation-matrix
+    (let ((x-axis (the plane-x-axis))
+	  (y-axis (the plane-y-axis))
+	  (z-axis (the normal)))
+      (mat4 (vx x-axis) (vx y-axis) (vx z-axis) 0
+	    (vy x-axis) (vy y-axis) (vy z-axis) 0
+	    (vz x-axis) (vz y-axis) (vz z-axis) 0
+	    0 0 0 1)))
+   (%inv-plane-rotation-matrix (minv (the %plane-rotation-matrix)))
+   (%center (let ((p (the center)))
+	      (safe-euclid (m* (the %inv-plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))
+   (%z (vz (the %center)))))
+
+  
+
+(defobject 3d-circle_a (3d-circle-mixin entity-mixin))
+
+(defmethod rm-draw-node ((self 3d-circle-mixin))
+  (when (the visible?)
+    (let* ((scene  (the krma:scene))
+	   (center (the %center))
+	   (z (the %z))
+	   (radius (the radius))
+	   (matrix (the %plane-rotation-matrix))
+	   (oid    (the object-id))
+	   (verts (make-array 360)))
+      (loop for i from 0 below 360
+	    with theta = 0.0d0
+	    with step = #.(/ pi 180.0d0)
+	    do (let ((angle (- theta (* i step))))
+		 (setf (aref verts i)
+		       (safe-euclid
+			(m* matrix (vec4 (+ (vx center) (* radius (cos angle)))
+					 (+ (vy center) (* radius (sin angle)))
+					 z
+					 1.0d0))))))
+      (push (krma:scene-add-filled-3d-instanced-tube-primitive
+	     scene (the group) nil nil 2.5f0 #xff
+	     (nconc
+	      (let ((start
+		      (safe-euclid
+		       (m* matrix (vec4 (+ (vx center) radius) (vy center) z 1.0d0)))))
+		(list (vx start) (vy start) (vz start)))
+	      (loop for coord across verts
+		    with vertices = ()
+		    do (setq vertices (cons (vx coord) (cons (vy coord) (cons (vz coord) vertices))))
+		    finally (return vertices)))
+	     oid)
+	    (the primitive-handles))
+      (setf (krma:object-from-id oid) self)))
+  (values))
+
+(defobject 3d-arc-mixin2 (3d-arc-mixin)
+  
+  :inputs
+  ((center (:validator (assure-double-vec3 value)))
+   (normal (:validator (let ((n (assure-double-vec3 value)))
+			 (vunit n))))
+   (radius (:validator (assure-nonnegative-double-float value)))
+   (start-angle (:validator (assure-double-float value)))
+   (end-angle (:validator (assure-double-float value)))
+   (ref-direction (:validator (let ((n (assure-double-vec3 value)))
+				(vunit n)))))
+  
+  :attributes
+  ((plane-y-axis (vunit (vc (the normal) (the ref-direction))))
+   (plane-x-axis (vunit (vc (the plane-y-axis) (the normal))))
+   (%plane-rotation-matrix
+    (let ((x-axis (the plane-x-axis))
+	  (y-axis (the plane-y-axis))
+	  (z-axis (the normal)))
+      (mat4 (vx x-axis) (vx y-axis) (vx z-axis) 0
+	    (vy x-axis) (vy y-axis) (vy z-axis) 0
+	    (vz x-axis) (vz y-axis) (vz z-axis) 0
+	    0 0 0 1)))
+   (%inv-plane-rotation-matrix (minv (the %plane-rotation-matrix)))
+   (%center (let ((p (the center)))
+	      (safe-euclid (m* (the %inv-plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))
+   (%z (vz (the %center)))
+   (%start (v+ (the %center)
+	       (v* (the radius)
+		   (vec3 (cos (the start-angle)) (sin (the start-angle)) 0.0d0))))
+   (%end (v+ (the %center)
+	     (v* (the radius)
+		 (vec3 (cos (the end-angle)) (sin (the end-angle)) 0.0d0))))
+   (start (let ((p (the %start)))
+	    (safe-euclid (m* (the %plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))
+   (end (let ((p (the %end)))
+	  (safe-euclid (m* (the %plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))
+   (delta-angle (let* ((start-angle (the start-angle))
+		       (end-angle (the end-angle))
+		       (a (- end-angle start-angle)))
+		  (if (< a 0.0d0)
+		      (+ a 2pi)
+		      a)))
+   (orientation :uncached :ccw)
+   (degenerate? :uncached (<= (the radius) 0.0d0))
+   (domain :uncached (list (the start-angle) (the end-angle)))))
+
+
+  
+(defobject 3d-arc_b (3d-arc-mixin2 entity-mixin))
+
+(defobject 3d-arc-mixin3 (3d-arc-mixin)
+  
+  :inputs
+  ((center (:validator (assure-double-vec3 value)))
+   (start-point (:validator (assure-double-vec3 value)))
+   (end-point (:validator (assure-double-vec3 value)))
+   (orientation (:validator (assert (or (eq value :ccw) (eq value :cw))) value) :ccw))
+  
+  :attributes
+  ((%%%center-to-start (v- (the start-point) (the center)))
+   (plane-x-axis (vunit (the %%%center-to-start)))
+   (%%%center-to-end (v- (the end-point) (the center)))
+   (normal (vunit (vc (the %%%center-to-end) (the %%%center-to-start))))
+   (plane-y-axis (vunit (vc (the normal) (the plane-x-axis))))
+   (radius (min (vlength (the %%%center-to-start))
+		(vlength (the %%%center-to-end))))
+   (%%center-to-start (v* (the radius) (vunit (the %%%center-to-start))))
+   (%%center-to-end (v* (the radius) (vunit (the %%%center-to-end))))
+   (%plane-rotation-matrix
+    (let ((x-axis (the plane-x-axis))
+	  (y-axis (the plane-y-axis))
+	  (z-axis (the normal)))
+      (mat4 (vx x-axis) (vx y-axis) (vx z-axis) 0
+	    (vy x-axis) (vy y-axis) (vy z-axis) 0
+	    (vz x-axis) (vz y-axis) (vz z-axis) 0
+	    0 0 0 1)))
+   (%inv-plane-rotation-matrix (minv (the %plane-rotation-matrix)))
+   (%center (let ((p (the center)))
+	      (safe-euclid (m* (the %inv-plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))
+   (%z (vz (the %center)))
+   (%center-to-start (let ((v (the %%center-to-start)))
+		       (safe-euclid (m* (the %inv-plane-rotation-matrix)
+					(vec4 (vx v) (vy v) (vz v) 1.0d0)))))
+   (%center-to-end (let ((v (the %%center-to-end)))
+		     (safe-euclid (m* (the %inv-plane-rotation-matrix)
+				      (vec4 (vx v) (vy v) (vz v) 1.0d0)))))
+   (%start (v+ (the %center) (the %center-to-start)))
+   (%end (v+ (the %center) (the %center-to-end)))
+   (start (let ((p (the %start)))
+	    (safe-euclid (m* (the %plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))
+   (end (let ((p (the %end)))
+	  (safe-euclid (m* (the %plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))
+   (start-angle :uncached 0.0d0)
+   (end-angle (let ((v (the %center-to-end)))
+		(atan (vy v) (vx v))))
+   (delta-angle (let* ((a (the end-angle)))
+		  (if (eq (the orientation) :ccw)
+		      (if (< a 0.0d0)
+			  (+ a 2pi)
+			  a)
+		      (if (< a 0)
+			  a
+			  (- a 2pi)))))
+   (degenerate? :uncached (<= (the radius) 0.0d0))
+   (domain :uncached (list (the start-angle) (the end-angle)))))
+
+(defobject 3d-arc_c (3d-arc-mixin3 entity-mixin))
+
+(defobject arc-test3 (block-mixin)
+  :components
+  ((arc :type '3d-arc_c
+	center (vec3 1 1 1)
+	start-point (vec3 1 0 0)
+	end-point (vec3 0 1 0)
+	orientation :cw)))
+  
+
+(defobject arc-test2 (block-mixin)
+  :components
+  ((arc :type '3d-arc_b
+	center (vec3 1 0 0)
+	normal (vec3 -1 -1 -1)
+	radius 0.5
+	ref-direction (vec3 -1 1 0)
+	start-angle 0
+	end-angle pi)))
 	
+
+(defobject circle-test (block-mixin)
+  :components
+  ((circle :type '3d-circle_a
+	   center (vec3 1 1 1)
+	   normal (vec3 0 1 0)
+	   radius 1.0d0)
+   (circle2 :type '3d-circle_a
+	    center (vec3 0 1 0)
+	    normal (vec3 1 1 1)
+	    radius 0.5)))
+  
+
+(defobject arc-test (block-mixin)
+  :components
+  ((arc :type '3d-arc_a
+	start (vec3 1 0 0)
+	interior (vec3 0 0 1)
+	end (vec3 0 1 0))))
