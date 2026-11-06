@@ -2163,16 +2163,17 @@
 	(oc::_wrap_delete_gp_pnt gp-pnt)))))
 
 (defun selection-set-centroid (application-frame)
-  (let ((ss (send application-frame climish::selection-set)))
-    (if ss
-	(let ((entities (map 'vector #'car ss)))
-	  (loop for entity across entities
-		with sum = (vec3 0 0 0)
-		do (setq sum (v+ sum (if (typep entity 'node-mixin)
-					 (transform-coordinate-from-to (centroidish entity) entity nil)
-					 (centroidish entity))))
-		finally (return (v/ sum (length entities)))))
-	(vec3 0 0 0))))
+  (let* ((ss (climish::selection-set application-frame))
+	 (size (fset:size ss))
+	 (sum (vec3 0 0 0)))
+    (when (zerop size)
+      (return-from selection-set-centroid sum))
+    (fset:do-map (entity point ss)
+      (declare (ignore point))
+      (setq sum (v+ sum (if (typep entity 'node-mixin)
+			    (transform-coordinate-from-to (centroidish entity) entity nil)
+			    (centroidish entity)))))
+    (v/ sum size)))
     
     
   
@@ -2422,7 +2423,9 @@ krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge fac
 	   scene group model-matrix nil 2 color vertices ub32-oid)))
 
 
-krma::(defun scene-add-diffuse-opencascade-face (scene group model-matrix color material face)
+(in-package :krma)
+
+(defun scene-add-diffuse-opencascade-face (scene group model-matrix color material face)
 	(declare (type krma-essential-scene-mixin scene))
 	(declare (type (and atom t) group))
 	(declare (type oc::topods-face face))
@@ -2439,17 +2442,19 @@ krma::(defun scene-add-diffuse-opencascade-face (scene group model-matrix color 
 	     draw-data handle face group (when model-matrix (mcopy model-matrix))
 	     color material orientation ub32-oid))))
 
-krma::(defun %draw-data-add-diffuse-opencascade-face
-	  (draw-data handle topods-face atom-group model-mtx ub32-color material orientation ub32-oid)
-	(declare (type retained-mode-draw-data draw-data))
-	(let ((draw-list (rm-draw-data-3d-triangle-list-with-normals-draw-list draw-data)))
-	  (setf (gethash handle (rm-draw-data-handle-hash-table draw-data))
-		(krma::%draw-list-add-diffuse-opencascade-face
-		 draw-list topods-face ub32-oid atom-group model-mtx ub32-color material orientation))
-	  (values)))
+(defun %draw-data-add-diffuse-opencascade-face
+    (draw-data handle topods-face atom-group model-mtx ub32-color material orientation ub32-oid)
+  (declare (type retained-mode-draw-data draw-data))
+  (setf (gethash handle (rm-draw-data-handle-hash-table draw-data))
+	(krma::with-next-draw-list (draw-list
+				    cmd-vector
+				    (rm-draw-data-3d-triangle-list-with-normals-draw-list draw-data)
+				    (make-instance (load-time-value (find-class '3d-vertex-with-normal-draw-list))))
+	  (krma::%draw-list-add-diffuse-opencascade-face
+	   draw-list cmd-vector topods-face ub32-oid atom-group model-mtx ub32-color material orientation))))
 
-krma::(defun %draw-list-add-diffuse-opencascade-face
-	  (3d-draw-list topods-face ub32-oid atom-group model-mtx ub32-color material orientation)
+(defun %draw-list-add-diffuse-opencascade-face
+	  (3d-draw-list cmd-vector topods-face ub32-oid atom-group model-mtx ub32-color material orientation)
 	(declare (type 3d-vertex-with-normal-draw-list-mixin 3d-draw-list))
 	(declare (type (unsigned-byte 32) ub32-oid ub32-color))
 	(let* ((index-array (draw-list-index-array 3d-draw-list))
@@ -2508,10 +2513,10 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 			  first-index (* 3 n-tris) vtx-offset
 			  atom-group model-mtx
 			  nil *white-texture* nil nil material)))
-		(vector-push-extend cmd (draw-list-cmd-vector 3d-draw-list))
+		(vector-push-extend cmd cmd-vector)
 		cmd)))))
   
-
+(in-package :rgn-geo)
 
 (defun make-opencascade-wire (oc-edges)
   (let ((mw (make-instance 'oc::brep-builder-api-make-wire)))
@@ -3193,7 +3198,7 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
    (thickness))
 
   :attributes
-  ((start (intersection (the edge1) (the edge2) (the edge1 end)))
+  ((start (intersection-1 (the edge1) (the edge2) (the edge1 end) self))
    (orig-dir (the edge1 direction))
    (dir (rotate-vector (vec3 (vx (the orig-dir)) (vy (the orig-dir)) 0.0d0)
 		       (qrotation (vec3 0 0 1) (* 3 pi/4)))))
@@ -3221,6 +3226,16 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 	  visible? nil
 	  profile (the profile)
 	  vector (vec3 0 0 (the thickness)))))
+
+(defun unsuppress-tree (node)
+  (when (typep node 'node-mixin)
+    (unsuppress-tree-1 node)
+    (adhoc-scene-graph::rm-redraw-node-recursively node)))
+
+(defun unsuppress-tree-1 (node)
+  (when (typep node 'node-mixin)
+    (setf (slot-value node 'adhoc::suppressed?) nil)
+    (mapcar #'unsuppress-tree-1 (send node children))))
 
 (defobject slot-feature (entity-mixin)
   :inputs
@@ -3255,10 +3270,10 @@ krma::(defun %draw-list-add-diffuse-opencascade-face
 	   visible? nil))
 
   :attributes
-  ((arc-start-point (intersection (the circle) (the slot-edge-front) (the slot-edge-front end)))
-   (arc-end-point (intersection (the circle) (the slot-edge-rear) (the slot-edge-rear end)))
-   (slot-front-start-point (intersection (the slot-edge-front) (the outer-edge) (the slot-edge-front end)))
-   (slot-rear-start-point (intersection (the slot-edge-rear) (the outer-edge) (the slot-edge-rear end))))
+  ((arc-start-point (intersection-1 (the circle) (the slot-edge-front) (the slot-edge-front end) self))
+   (arc-end-point (intersection-1 (the circle) (the slot-edge-rear) (the slot-edge-rear end) self))
+   (slot-front-start-point (intersection-1 (the slot-edge-front) (the outer-edge) (the slot-edge-front end) self))
+   (slot-rear-start-point (intersection-1 (the slot-edge-rear) (the outer-edge) (the slot-edge-rear end) self)))
 
   :components
   ((arc-1 :type 'arc
