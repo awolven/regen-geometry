@@ -2,7 +2,7 @@
   (:use :3dm :adhoc-scene-graph)
   (:shadow #:intersection)
   (:shadow #:locally)
-  (:export #:intersection)
+  (:export #:intersection #:half #:twice)
   (:import-from :3dm.d
 		#:vec2
 		#:vec3
@@ -20,6 +20,12 @@
   
 
 (in-package :rgn-geo)
+
+(defun half (number)
+  (/ number 2))
+
+(defun twice (number)
+  (* number 2))
 
 (defmacro intersection (entity-a entity-b pick)
   `(intersection-1 ,entity-a ,entity-b ,pick ,self))
@@ -64,15 +70,8 @@
 	      (binomial-coefficient (1- n) k)))))
 
 (defobject entity-mixin (selectable-mixin node-mixin)
-;;
-;;  :inputs
-;;  ((krma:scene :defaulting (krma:default-scene))
-;;   
-;;   (group :defaulting :default))
-
   :attributes
-  (#+NIL(krma:scene :uncached (the superior krma:scene))
-   (group :uncached (the superior group))
+  ((group :uncached (the superior group))
 
    (origin :uncached (if (the superior)
 			 (the superior origin)
@@ -92,7 +91,7 @@
    (inverse-global-matrix :uncached (if (the superior)
 					(the superior inverse-global-matrix)
 					(the inverse-matrix)))					
-   (node-children :uncached nil)))
+   (node-children :uncached (fset:set))))
 
 (defobject curve-mixin ())
 (defobject line-mixin ())
@@ -2631,6 +2630,181 @@ krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge fac
 (defmethod rm-erase-node ((self block-mixin))
   (krma:delete-group (the krma:scene) (the group)))
 
+(defobject cylinder-mixin (block-mixin))
+
+(defobject solid-primitive-mixin (solid-mixin entity-mixin)
+  :inputs ((body :visual)))
+
+(defobject cylinder_b (cylinder-mixin)
+  :inputs
+  ((radius :visual 1.0d0)
+   (height :visual 1.0d0)
+   (center-on :visual (vec3 0 0 0))
+   (display :visual :wireframe))
+
+  :attributes
+  ((origin (v+ (the center-on) (safe-euclid (m* (the rotation-matrix) (vec4 0 0 (- (half (the height))) 1.0d0)))))
+   (oc-normal (gp:dir (vx (the :bottom-circle normal)) (vy (the :bottom-circle normal)) (vz (the :bottom-circle normal))))
+   (oc-center (gp:pnt (vx (the :bottom-circle center)) (vy (the :bottom-circle center)) (vz (the :bottom-circle center))))
+   (oc-ax2 (gp:ax2 :p (the oc-center) :n (the oc-normal)))
+   (oc-solid (oc::shape (make-instance 'oc::brep-prim-api-make-cylinder
+				      :axes (the oc-ax2)
+				      :h (coerce (the height) 'double-float)
+				      :r (coerce (the radius) 'double-float)))))
+  
+  :components
+  ((:bottom-circle :type '3d-circle_a
+		   center (vec3 0 0 0)
+		   normal (vec3 0 0 1)
+		   radius (the radius)
+		   visible? (eq (the display) :wireframe))
+   (:top-circle :type '3d-circle_a
+		center (vec3 (vx (the :bottom-circle center))
+			     (vy (the :bottom-circle center))
+			     (the height))
+		normal (the :bottom-circle normal)
+		radius (the :bottom-circle radius)
+		visible? (eq (the display) :wireframe))
+   (line-1 :type 'line
+	   start (v+ (the :bottom-circle center) (v* (the :bottom-circle radius) (vec3 1 0 0)))
+	   end (v+ (the :top-circle center) (v* (the :top-circle radius) (vec3 1 0 0)))
+	   visible? (eq (the display) :wireframe))
+   (line-2 :type 'line
+	   start (v+ (the :bottom-circle center) (v* (the :bottom-circle radius) (vec3 0 1 0)))
+	   end (v+ (the :top-circle center) (v* (the :top-circle radius) (vec3 0 1 0)))
+	   visible? (eq (the display) :wireframe))
+   (line-3 :type 'line
+	   start (v+ (the :bottom-circle center) (v* (the :bottom-circle radius) (vec3 -1 0 0)))
+	   end (v+ (the :top-circle center) (v* (the :top-circle radius) (vec3 -1 0 0)))
+	   visible? (eq (the display) :wireframe))
+   (line-4 :type 'line
+	   start (v+ (the :bottom-circle center) (v* (the :bottom-circle radius) (vec3 0 -1 0)))
+	   end (v+ (the :top-circle center) (v* (the :top-circle radius) (vec3 0 -1 0)))
+	   visible? (eq (the display) :wireframe))
+   
+   (:solid :type 'solid-primitive-mixin
+	   body (the oc-solid)
+	   visible? (eq (the display) :shaded))))
+
+(defobject hollow-cylinder_b (cylinder_b)
+  :inputs ((thickness 0.1d0))
+  :attributes
+  ((oc-solid-2 (oc::shape (make-instance 'oc::brep-prim-api-make-cylinder
+				      :axes (the oc-ax2)
+				      :h (coerce (the height) 'double-float)
+				      :r (coerce (- (the radius) (the thickness)) 'double-float)))))
+
+  :components
+  ((:bottom-circle-2 :type '3d-circle_a
+		   center (vec3 0 0 0)
+		   normal (vec3 0 0 1)
+		   radius (- (the radius) (the thickness))
+		   visible? (eq (the display) :wireframe))
+   (:top-circle-2 :type '3d-circle_a
+		center (vec3 (vx (the :bottom-circle-2 center))
+			     (vy (the :bottom-circle-2 center))
+			     (the height))
+		normal (the :bottom-circle-2 normal)
+		radius (the :bottom-circle-2 radius)
+		visible? (eq (the display) :wireframe))
+   (line-1-2 :type 'line
+	   start (v+ (the :bottom-circle-2 center) (v* (the :bottom-circle-2 radius) (vec3 1 0 0)))
+	   end (v+ (the :top-circle-2 center) (v* (the :top-circle-2 radius) (vec3 1 0 0)))
+	   visible? (eq (the display) :wireframe))
+   (line-2-2 :type 'line
+	   start (v+ (the :bottom-circle-2 center) (v* (the :bottom-circle-2 radius) (vec3 0 1 0)))
+	   end (v+ (the :top-circle-2 center) (v* (the :top-circle-2 radius) (vec3 0 1 0)))
+	   visible? (eq (the display) :wireframe))
+   (line-3-2 :type 'line
+	   start (v+ (the :bottom-circle-2 center) (v* (the :bottom-circle-2 radius) (vec3 -1 0 0)))
+	   end (v+ (the :top-circle-2 center) (v* (the :top-circle-2 radius) (vec3 -1 0 0)))
+	   visible? (eq (the display) :wireframe))
+   (line-4-2 :type 'line
+	   start (v+ (the :bottom-circle-2 center) (v* (the :bottom-circle-2 radius) (vec3 0 -1 0)))
+	   end (v+ (the :top-circle-2 center) (v* (the :top-circle-2 radius) (vec3 0 -1 0)))
+	   visible? (eq (the display) :wireframe))
+   (s-1 :type 'solid-primitive-mixin
+	body (the oc-solid)
+	visible? nil)
+   (s-2 :type 'solid-primitive-mixin
+	body (the oc-solid-2)
+	visible? nil)
+   (:solid :type 'subtraction
+	   objects (list (the s-1))
+	   tools (list (the s-2))
+	   visible? (eq (the display) :shaded))))
+
+
+(defobject prism-mixin (block-mixin))
+
+(defobject prism_a (prism-mixin)
+  :inputs
+  ((width :visual 1.0d0)
+   (length :visual 1.0d0)
+   (height :visual 1.0d0)
+   (display :visual :wireframe))
+
+  :attributes
+  ((centroid (vec3 (half (the width)) (half (the length)) (half (the height)))))
+
+  :components
+  ((:edge-left-rear :type 'line
+		    start (vec3 0 0 0)
+		    end (v+ (the-part start) (vec3 0 0 (the height)))
+		    visible? (eq (the display) :wireframe))
+   (:edge-right-rear :type 'line
+		     start (v+ (vec3 0 0 0) (vec3 (the width) 0 0))
+		     end (v+ (the-part start) (vec3 0 0 (the height)))
+		     visible? (eq (the display) :wireframe))
+   (:edge-left-front :type 'line
+		     start (v+ (vec3 0 0 0) (vec3 0 (the length) 0))
+		     end (v+ (the-part start) (vec3 0 0 (the height)))
+		     visible? (eq (the display) :wireframe))
+   (:edge-right-front :type 'line
+		      start (v+ (vec3 0 0 0) (vec3 (the width) (the length) 0))
+		      end (v+ (the-part start) (vec3 0 0 (the height)))
+		      visible? (eq (the display) :wireframe))
+   (:edge-left-top :type 'line
+		   start (the :edge-left-rear end)
+		   end (the :edge-left-front end)
+		   visible? (eq (the display) :wireframe))
+   (:edge-right-top :type 'line
+		    start (the :edge-right-rear end)
+		    end (the :edge-right-front end)
+		    visible? (eq (the display) :wireframe))
+   (:edge-rear-top :type 'line
+		   start (the :edge-left-rear end)
+		   end (the :edge-right-rear end)
+		   visible? (eq (the display) :wireframe))
+   (:edge-front-top :type 'line
+		    start (the :edge-left-front end)
+		    end (the :edge-right-front end)
+		    visible? (eq (the display) :wireframe))
+   (:edge-left-bottom :type 'line
+		      start (the :edge-left-rear start)
+		      end (the :edge-left-front start)
+		      visible? (eq (the display) :wireframe))
+   (:edge-right-bottom :type 'line
+		       start (the :edge-right-rear start)
+		       end (the :edge-right-front start)
+		       visible? (eq (the display) :wireframe))
+   (:edge-rear-bottom :type 'line
+		      start (the :edge-left-rear start)
+		      end (the :edge-right-rear start)
+		      visible? (eq (the display) :wireframe))
+   (:edge-front-bottom :type 'line
+		       start (the :edge-left-front start)
+		       end (the :edge-right-front start)
+		       visible? (eq (the display) :wireframe))))
+		      
+  
+
+
+
+  
+		   
+
+
 
   
 (defmethod edges-connect? ((edge1 plane-curve-mixin) (edge2 plane-curve-mixin))
@@ -3663,7 +3837,7 @@ krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge fac
 	  (* scalar (mref 2 0)) (* scalar (mref 2 1)) (* scalar (mref 2 2)) (* scalar (mref 2 3))
 	  (* scalar (mref 3 0)) (* scalar (mref 3 1)) (* scalar (mref 3 2)) (* scalar (mref 3 3)))))
 
-(defobject 3d-circlish-mixin ())				  
+(defobject 3d-circlish-mixin (space-curve-mixin))
 
 (defobject 3d-arc-mixin (3d-circlish-mixin))
 
@@ -3821,8 +3995,30 @@ krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge fac
    (%inv-plane-rotation-matrix (minv (the %plane-rotation-matrix)))
    (%center (let ((p (the center)))
 	      (safe-euclid (m* (the %inv-plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))
-   (%z (vz (the %center)))))
+   (%z (vz (the %center)))
+   (%start-and-end (let* ((p (vec3 (+ (vx (the center)) (the radius)) (vy (the center)) 0.0d0)))
+	     (safe-euclid (m* (the %inv-plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))
+   (%interior (let* ((p (vec3 (- (vx (the center)) (the radius)) (vy (the center)) 0.0d0)))
+		(safe-euclid (m* (the %inv-plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))))
 
+(defmethod to-opencascade ((self 3d-circle-mixin))
+  (let* ((start-and-end (gp:pnt (vx (the %start-and-end)) (vy (the %start-and-end)) (vz (the %start-and-end))))
+	 (interior (gp:pnt (vx (the %interior)) (vy (the %interior)) (vz (the %interior))))
+	 (normal (gp:dir (vx (the normal)) (vy (the normal)) (vz (the normal))))
+	 (center (gp:pnt (vx (the center)) (vy (the center)) (vz (the center))))
+	 (ax2 (gp:ax2 :p center :n normal))
+	 (circ (gp:circ :a2 ax2 :r (the radius))))
+    (list (oc::value (make-instance 'oc::gc-make-arc-of-circle
+				    :p1 start-and-end
+				    :p2 interior
+				    :circ circ
+				    :sense t))
+	  (oc::value (make-instance 'oc::gc-make-arc-of-circle
+				    :p1 interior
+				    :p2 start-and-end
+				    :circ circ
+				    :sense t)))))
+  
   
 
 (defobject 3d-circle_a (3d-circle-mixin entity-mixin))
