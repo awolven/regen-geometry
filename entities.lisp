@@ -3,6 +3,13 @@
   (:shadow #:intersection)
   (:shadow #:locally)
   (:export #:intersection #:half #:twice)
+  (:import-from :c++-abi
+		#:?
+		#:!
+		#:p
+		#:v)
+  (:shadowing-import-from :ghto
+			  #:let*)
   (:import-from :3dm.d
 		#:vec2
 		#:vec3
@@ -20,6 +27,26 @@
   
 
 (in-package :rgn-geo)
+
+(defmethod this::set-value-2 ((self oc2::n-collection_array-1<double>)
+			      (index integer) (value double-float)
+			      &rest args)
+  (declare (ignore args))
+  (cffi:with-foreign-object (p :double)
+    (setf (cffi:mem-aref p :double) value)
+    (let ((ptr (allocate-instance (load-time-value (find-class 'c++-abi::pointer)))))
+      (setf (p ptr) p)
+      (this::set-value-2 self index ptr))))
+
+(defmethod this::set-value-2 ((self oc2::n-collection_array-1<int>)
+			      (index integer) (value integer)
+			      &rest args)
+  (declare (ignore args))
+  (cffi:with-foreign-object (p :int)
+    (setf (cffi:mem-aref p :int) value)
+    (let ((ptr (allocate-instance (load-time-value (find-class 'c++-abi::pointer)))))
+      (setf (p ptr) p)
+      (this::set-value-2 self index ptr))))
 
 (defun half (number)
   (/ number 2))
@@ -127,11 +154,11 @@
 (defmethod to-opencascade ((self 2d-line-mixin))
   (let* ((start (the start))
 	 (end   (the end))
-	 (tail  (gp:pnt (vx start) (vy start) 0.0d0))
-	 (head  (gp:pnt (vx end)   (vy end)   0.0d0)))
-    (oc::value (make-instance 'oc::gc-make-segment
-			      :P1 tail
-			      :P2 head))))
+	 (tail  (make-instance 'oc2::gp_pnt :the-xp (vx start) :the-yp (vy start) :the-zp 0.0d0))
+	 (head  (make-instance 'oc2::gp_pnt :the-xp (vx end)   :the-yp (vy end)   :the-zp 0.0d0)))
+    (this::value-0 (make-instance 'oc2::gc_make-segment
+			      :the-P1 tail
+			      :the-P2 head))))
 
 (defun assure-double-float (value)
   (assert (typep value 'real))
@@ -340,11 +367,11 @@
 (defmethod to-opencascade ((self 3d-line-mixin))
   (let* ((start (the start))
 	 (end   (the end))
-	 (tail  (gp:pnt (vx start) (vy start) (vz start)))
-	 (head  (gp:pnt (vx end)   (vy end)   (vz end))))
-    (oc::value (make-instance 'oc::gc-make-segment
-			      :P1 tail
-			      :P2 head))))
+	 (tail  (make-instance 'oc2::gp_pnt :the-xp (vx start) :the-yp (vy start) :the-zp (vz start)))
+	 (head  (make-instance 'oc2::gp_pnt :the-xp (vx end)   :the-yp (vy end)   :the-zp (vz end))))
+    (this::value-0 (make-instance 'oc2::gc_make-segment
+			      :the-P1 tail
+			      :the-P2 head))))
 
 (defclass line ()
   ()
@@ -810,13 +837,13 @@
   (let* ((start (the start))
 	 (mid   (the mid))
 	 (end   (the end))
-	 (p1 (gp:pnt (vx start) (vy start) 0.0d0))
-	 (p2 (gp:pnt (vx mid)   (vy mid)   0.0d0))
-	 (p3 (gp:pnt (vx end)   (vy end)   0.0d0)))
-    (oc::value (make-instance 'oc::gc-make-arc-of-circle
-			      :P1 p1
-			      :P2 p2
-			      :P3 p3))))    
+	 (p1 (make-instance 'oc2::gp_pnt :the-xp (vx start) :the-yp (vy start) :the-zp 0.0d0))
+	 (p2 (make-instance 'oc2::gp_pnt :the-xp (vx mid)   :the-yp (vy mid)   :the-zp 0.0d0))
+	 (p3 (make-instance 'oc2::gp_pnt :the-xp (vx end)   :the-yp (vy end)   :the-zp 0.0d0)))
+    (this::value-0 (make-instance 'oc2::gc_make-arc-of-circle
+			      :the-P1 p1
+			      :the-P2 p2
+			      :the-P3 p3))))    
 
 (defmethod rm-draw-node ((self arc-mixin))
   (when (the visible?)
@@ -1077,7 +1104,7 @@
   ;; todo: make work for rational curves
   (declare (optimize (speed 3) (safety 3)))
   (setq parameter (coerce parameter 'double-float))
-  (let* ((n (the degree)))
+  (let ((n (the degree)))
     (declare (type fixnum n))
     (let* ((B (bernstein n parameter))
 	   (Cw (3dm.d::%vec4 0.0d0 0.0d0 0.0d0 0.0d0))
@@ -1105,7 +1132,7 @@
   ;; todo: make work for rational curves
   (declare (optimize (speed 3) (safety 3)))
   (setq parameter (coerce parameter 'double-float))
-  (let* ((n (the degree)))
+  (let ((n (the degree)))
     (declare (type fixnum n))
     (let* ((B (bernstein n parameter))
 	   (C (3dm.d::%vec3 0.0d0 0.0d0 0.0d0))
@@ -1270,20 +1297,21 @@
 (defmethod to-opencascade ((self b-spline-space-curve-mixin))
   (let* ((hcpoints (the homogeneous-control-points))
 	 (number-of-poles (length hcpoints))
-	 (poles (let ((array (make-instance 'oc::TCol-gp-Array1-Of-Pnt
-					    :theLower 1 :theUpper number-of-poles)))
+	 (poles (let ((array (make-instance 'oc2::n-collection_array-1<gp_pnt>  
+					    :the-Lower 1 :the-Upper number-of-poles)))
 		  (loop for i from 1 to number-of-poles
 			for j from 0
-			do (let ((gp-pnt (gp:pnt (vx (aref hcpoints j))
-						 (vy (aref hcpoints j))
-						 (vz (aref hcpoints j)))))
-			     (oc::set-value array i gp-pnt))
+			do (let ((gp-pnt (make-instance 'oc2::gp_pnt
+							:the-xp (vx (aref hcpoints j))
+							:the-yp (vy (aref hcpoints j))
+							:the-zp (vz (aref hcpoints j)))))
+			     (this::set-value-2 array i gp-pnt))
 			finally (return array))))
-	 (weights (let ((array (make-instance 'oc::TCol-Std-Array1-Of-Real
-					      :theLower 1 :theUpper number-of-poles)))
+	 (weights (let ((array (make-instance 'oc2::n-collection_array-1<double>
+					      :the-Lower 1 :the-Upper number-of-poles)))
 		    (loop for i from 1 to number-of-poles
 			  for j from 0
-			  do (oc::set-value array i (vw (aref hcpoints j)))
+			  do (this::set-value-2 array i (vw (aref hcpoints j)))
 			  finally (return array)))))
     
     (multiple-value-bind (%knots %multiplicities)
@@ -1304,23 +1332,25 @@
 	      do (setq last-knot knot)
 	      finally (push multiplicity multiplicities)
 		      (return (values (nreverse knots) (nreverse multiplicities))))
-      (let ((knots (let ((array (make-instance 'oc::TCol-Std-Array1-Of-Real
-					       :theLower 1 :theUpper (length %knots))))
+      (let ((knots (let ((array (make-instance 'oc2::n-collection_array-1<double>
+					       :the-Lower 1 :the-Upper (length %knots))))
 		     (loop for i from 1 for knot in %knots
-			   do (oc::set-value array i knot)
+			   do (this::set-value-2 array i knot)
 			   finally (return array))))
-	    (multiplicities (let ((array (make-instance 'oc::TCol-Std-Array1-Of-Integer
-							:theLower 1 :theUpper (length %multiplicities))))
+	    (multiplicities (let ((array (make-instance 'oc2::n-collection_array-1<int>
+							:the-Lower 1 :the-Upper (length %multiplicities))))
 			      (loop for i from 1 for m in %multiplicities
-				    do (oc::set-value array i m)
+				    do (this::set-value-2 array i m)
 				    finally (return array)))))
-	(make-instance 'oc::geom-bspline-curve
+	(make-instance 'oc2::geom_b-spline-curve
 		       :Poles poles
 		       :Weights weights
 		       :Knots knots
 		       :Multiplicities multiplicities
 		       :Degree (the degree)
-		       :Periodic (the periodic?))))))
+		       :Periodic (the periodic?)
+		       :check-rational t
+		       )))))
 
 (defun find-span (n p u knot-vector)
   ;; Algorithm A2.1 pg. 68 _The Nurbs Book_ 2nd edition
@@ -1467,20 +1497,21 @@
 (defmethod to-opencascade ((self b-spline-plane-curve-mixin))
   (let* ((hcpoints (the homogeneous-control-points))
 	 (number-of-poles (length hcpoints))
-	 (poles (let ((array (make-instance 'oc::TCol-gp-Array1-Of-Pnt
-					    :theLower 1 :theUpper number-of-poles)))
+	 (poles (let ((array (make-instance 'oc2::n-collection_array-1<gp_pnt>
+					    :the-Lower 1 :the-Upper number-of-poles)))
 		  (loop for i from 1 to number-of-poles
 			for j from 0
-			do (let* ((gp-pnt (gp:pnt (vx (aref hcpoints j))
-						  (vy (aref hcpoints j))
-						  0.0d0)))
-			     (oc::set-value array i gp-pnt))
+			do (let* ((gp-pnt (make-instance 'oc2::gp_pnt
+							 :the-xp (vx (aref hcpoints j))
+							 :the-yp (vy (aref hcpoints j))
+							 :the-zp 0.0d0)))
+			     (this::set-value-2 array i gp-pnt))
 			finally (return array))))
-	 (weights (let ((array (make-instance 'oc::TCol-Std-Array1-Of-Real
-					      :theLower 1 :theUpper number-of-poles)))
+	 (weights (let ((array (make-instance 'oc2::n-collection_array-1<double>
+					      :the-Lower 1 :the-Upper number-of-poles)))
 		    (loop for i from 1 to number-of-poles
 			  for j from 0
-			  do (oc::set-value array i (vz (aref hcpoints j)))
+			  do (this::set-value-2 array i (vz (aref hcpoints j)))
 			  finally (return array)))))
     
     (multiple-value-bind (%knots %multiplicities)
@@ -1501,23 +1532,25 @@
 	      do (setq last-knot knot)
 	      finally (push multiplicity multiplicities)
 		      (return (values (nreverse knots) (nreverse multiplicities))))
-      (let ((knots (let ((array (make-instance 'oc::TCol-Std-Array1-Of-Real
-					       :theLower 1 :theUpper (length %knots))))
+      (let ((knots (let ((array (make-instance 'oc2::n-collection_array-1<double>
+					       :the-Lower 1 :the-Upper (length %knots))))
 		     (loop for i from 1 for knot in %knots
-			   do (oc::set-value array i knot)
+			   do (this::set-value-2 array i knot)
 			   finally (return array))))
-	    (multiplicities (let ((array (make-instance 'oc::TCol-Std-Array1-Of-Integer
-							:theLower 1 :theUpper (length %multiplicities))))
+	    (multiplicities (let ((array (make-instance 'oc2::n-collection_array-1<int>
+							:the-Lower 1 :the-Upper (length %multiplicities))))
 			      (loop for i from 1 for m in %multiplicities
-				    do (oc::set-value array i m)
+				    do (this::set-value-2 array i m)
 				    finally (return array)))))
-	(make-instance 'oc::geom-bspline-curve
+	(make-instance 'oc2::geom_b-spline-curve
 		       :Poles poles
 		       :Weights weights
 		       :Knots knots
 		       :Multiplicities multiplicities
 		       :Degree (the degree)
-		       :Periodic (the periodic?))))))
+		       :Periodic (the periodic?)
+		       :check-rational t
+		       )))))
 
 
     
@@ -1810,7 +1843,7 @@
 	(krma::rm-dispatch-to-render-thread-with-handle (scene draw-data handle)
 	  (let ((draw-list (krma::rm-draw-data-3d-triangle-list-with-normals-draw-list draw-data)))
 	    (setf (gethash handle (krma::rm-draw-data-handle-hash-table draw-data))
-		  (let* ((va (krma::draw-list-vertex-array draw-list))
+		  (let ((va (krma::draw-list-vertex-array draw-list))
 			 (ia (krma::draw-list-index-array draw-list)))
 		    (declare (type krma::foreign-adjustable-array ia va))
 		    (let ((first-index (krma::foreign-array-fill-pointer ia))
@@ -2110,56 +2143,43 @@
    (show-edges? t))
 
   :attributes
-  ((oc-gprops (let ((GProps (oc::_wrap_new_GProp_GProps__SWIG_0)))
-		(oc::_wrap_BRepGProp_VolumeProperties__SWIG_0 (oc::ff-pointer (the body)) GProps nil)
+  ((oc-gprops (let ((GProps (make-instance 'oc2::g-prop_g-props)))
+		(b-rep-g-prop::volume-properties-5 (the body) GProps nil nil nil)
 		GProps))
-   (centroid :uncached (let ((gp-pnt (oc::_wrap_GProp_GProps_CentreOfMass (the oc-gprops))))
-			 (prog1 (vec3 (cffi:mem-aref gp-pnt :double 0)
-				      (cffi:mem-aref gp-pnt :double 1)
-				      (cffi:mem-aref gp-pnt :double 2))
-			   (oc::_wrap_delete_gp_pnt gp-pnt))))
-   (mass :uncached (oc::_wrap_GProp_GProps_Mass (the oc-gprops)))))
+   (centroid :uncached (let ((gp-pnt (this::centre-of-mass-0 (the oc-gprops))))
+			 (vec3 (this::x-0 gp-pnt) (this::y-0 gp-pnt) (this::z-0 gp-pnt))))
+   (mass :uncached (this::mass-0 (the oc-gprops)))))
 
-(defmethod centroidish ((thing oc::topods-face))
-  (let ((gprops (oc::_wrap_new_GProp_GProps__SWIG_0)))
-    (oc::_wrap_BRepGProp_SurfaceProperties__SWIG_0 (oc::ff-pointer thing) gprops)
-    (let ((gp-pnt (oc::_wrap_GProp_GProps_CentreOfMass gprops)))
-      (prog1 (vec3 (cffi:mem-aref gp-pnt :double 0)
-		   (cffi:mem-aref gp-pnt :double 1)
-		   (cffi:mem-aref gp-pnt :double 2))
-	(oc::_wrap_delete_gp_pnt gp-pnt)))))
+(defmethod centroidish ((thing oc2::topo-ds_face))
+  (let ((gprops (make-instance 'oc2::g-prop_g-props))
+	(eps 1.0d-3))
+    (b-rep-g-prop::surface-properties-4 thing gprops eps t)
+    (let ((gp-pnt (this::centre-of-mass-0 gprops)))
+      (vec3 (this::x-0 gp-pnt) (this::y-0 gp-pnt) (this::z-0 gp-pnt)))))
 
-(defmethod area ((thing oc::topods-face))
-  (let ((gprops (oc::_wrap_new_GProp_GProps__SWIG_0)))
-    (oc::_wrap_BRepGProp_SurfaceProperties__SWIG_0 (oc::ff-pointer thing) gprops)
-    (oc::_wrap_GProp_GProps_Mass gprops)))
+(defmethod area ((thing oc2::topo-ds_face))
+  (let ((gprops (make-instance 'oc2::g-prop_g-props))
+	(eps 1.0d-3))
+    (b-rep-g-prop::surface-properties-4 thing gprops eps t)
+    (this::mass-0 gprops)))
 
-(defmethod centroidish ((thing oc::topods-compound))
-  (let ((gprops (oc::_wrap_new_GProp_GProps__SWIG_0)))
-    (oc::_wrap_BRepGProp_VolumeProperties__SWIG_0 (oc::ff-pointer thing) gprops nil)
-    (let ((gp-pnt (oc::_wrap_GProp_GProps_CentreOfMass gprops)))
-      (prog1 (vec3 (cffi:mem-aref gp-pnt :double 0)
-		   (cffi:mem-aref gp-pnt :double 1)
-		   (cffi:mem-aref gp-pnt :double 2))
-	(oc::_wrap_delete_gp_pnt gp-pnt)))))
+(defmethod centroidish ((thing oc2::topo-ds_compound))
+  (let ((gprops (make-instance 'oc2::g-prop_g-props)))
+    (b-rep-g-prop::volume-properties-5 thing GProps nil nil nil)
+    (let ((gp-pnt (this::centre-of-mass-0 gprops)))
+      (vec3 (this::x-0 gp-pnt) (this::y-0 gp-pnt) (this::z-0 gp-pnt)))))
 
-(defmethod centroidish ((thing oc::topods-solid))
-  (let ((gprops (oc::_wrap_new_GProp_GProps__SWIG_0)))
-    (oc::_wrap_BRepGProp_VolumeProperties__SWIG_0 (oc::ff-pointer thing) gprops nil)
-    (let ((gp-pnt (oc::_wrap_GProp_GProps_CentreOfMass gprops)))
-      (prog1 (vec3 (cffi:mem-aref gp-pnt :double 0)
-		   (cffi:mem-aref gp-pnt :double 1)
-		   (cffi:mem-aref gp-pnt :double 2))
-	(oc::_wrap_delete_gp_pnt gp-pnt)))))
+(defmethod centroidish ((thing oc2::topo-ds_solid))
+  (let ((gprops (make-instance 'oc2::g-prop_g-props)))
+    (b-rep-g-prop::volume-properties-5 thing GProps nil nil nil)
+    (let ((gp-pnt (this::centre-of-mass-0 gprops)))
+      (vec3 (this::x-0 gp-pnt) (this::y-0 gp-pnt) (this::z-0 gp-pnt)))))
 
-(defmethod centroidish ((thing oc::topods-shell))
-  (let ((gprops (oc::_wrap_new_GProp_GProps__SWIG_0)))
-    (oc::_wrap_BRepGProp_VolumeProperties__SWIG_0 (oc::ff-pointer thing) gprops nil)
-    (let ((gp-pnt (oc::_wrap_GProp_GProps_CentreOfMass gprops)))
-      (prog1 (vec3 (cffi:mem-aref gp-pnt :double 0)
-		   (cffi:mem-aref gp-pnt :double 1)
-		   (cffi:mem-aref gp-pnt :double 2))
-	(oc::_wrap_delete_gp_pnt gp-pnt)))))
+(defmethod centroidish ((thing oc2::topo-ds_shell))
+  (let ((gprops (make-instance 'oc2::g-prop_g-props)))
+    (b-rep-g-prop::volume-properties-5 thing GProps nil nil nil)
+    (let ((gp-pnt (this::centre-of-mass-0 gprops)))
+      (vec3 (this::x-0 gp-pnt) (this::y-0 gp-pnt) (this::z-0 gp-pnt)))))
 
 (defun selection-set-centroid (application-frame)
   (let* ((ss (climish::selection-set application-frame))
@@ -2201,7 +2221,7 @@
 
 (defmethod rm-erase-solid ((self solid-mixin)
 			   (scene krma:krma-essential-scene-mixin)
-			   (shape oc::topods-compound))
+			   (shape oc2::topo-ds_compound)) ;; change this to rgn-geo::topods-compound
   (mapcar #'(lambda (shape)
 	      (rm-erase-solid self scene shape))
 	  (topods-children shape))
@@ -2209,7 +2229,7 @@
 
 (defmethod rm-erase-solid ((self solid-mixin)
 			   (scene krma:krma-essential-scene-mixin)
-			   (shape oc::topods-solid))
+			   (shape oc2::topo-ds_solid)) ;; change this to rgn-geo::topods-solid
   (mapcar #'(lambda (shape)
 	      (rm-erase-solid self scene shape))
 	  (topods-children shape))
@@ -2217,7 +2237,7 @@
 
 (defmethod rm-erase-solid ((self solid-mixin)
 			   (scene krma:krma-essential-scene-mixin)
-			   (shape oc::topods-shell))
+			   (shape oc2::topo-ds_shell))
   (mapcar #'(lambda (shape)
 	      (rm-erase-solid self scene shape))
 	  (topods-children shape))
@@ -2226,7 +2246,7 @@
 
 (defmethod rm-erase-solid ((self solid-mixin)
 			   (scene krma:krma-essential-scene-mixin)
-			   (shape oc::topods-face))
+			   (shape oc2::topo-ds_face)) ;; change this to rgn-geo::topods-face
   (krma:delete-primitives scene (send shape climish::primitive-handles))
   (forget-object shape)
   (setf (send shape climish::primitive-handles) nil)
@@ -2237,32 +2257,32 @@
   (rm-retransform-solid self (the krma:scene) (the shape)))
 
 (defmethod rm-retransform-solid ((self solid-mixin) (scene krma:krma-essential-scene-mixin)
-				 (shape oc::topods-compound))
+				 (shape oc2::topo-ds_compound))
   ;; transform solid here
   )
 
 (defmethod rm-retransform-solid ((self solid-mixin) (scene krma:krma-essential-scene-mixin)
-				 (shape oc::topods-solid))
+				 (shape oc2::topo-ds_solid))
   ;; transform solid here
   )
 
 (defmethod rm-retransform-solid ((self solid-mixin) (scene krma:krma-essential-scene-mixin)
-				 (shape oc::topods-shell))
+				 (shape oc2::topo-ds_shell))
   ;; transform solid here
   )
 
 (defmethod rm-retransform-solid ((self solid-mixin) (scene krma:krma-essential-scene-mixin)
-				 (shape oc::topods-face))
+				 (shape oc2::topo-ds_face))
   ;; transform solid here
   )
 
 (defmethod rm-retransform-solid ((self solid-mixin) (scene krma:krma-essential-scene-mixin)
-				 (shape oc::topods-edge))
+				 (shape oc2::topo-ds_edge))
   ;; transform solid here
   )
 
 (defmethod rm-retransform-solid ((self solid-mixin) (scene krma:krma-essential-scene-mixin)
-				 (shape oc::topods-vertex))
+				 (shape oc2::topo-ds_vertex))
   ;; transform solid here
   )
 
@@ -2271,25 +2291,53 @@
 
 
 (defun topods-children (topods-shape)
+  ;; somehow I have two of these functions, one in rgn/oc-integration.lisp
   (when topods-shape
-    (let ((iterator (make-instance 'oc::TopoDS-Iterator :S topods-shape)))
-      (loop while (oc::more-p iterator)
-            collect (prog1 (oc::value iterator)
-                      (oc:next iterator))))))
+    (let ((iterator (make-instance 'oc2::Topo-DS_Iterator :S topods-shape :cum-ori t :cum-loc t)))
+      (loop while (this::more-0 iterator)
+            collect (let ((shape (make-instance 'oc2::topo-ds_shape)))
+		      (c++::= shape (this::value-0 iterator))
+		      (prog1 (with-topods-shape shape)
+			(this::next-0 iterator)))))))
 
 (defmethod rm-draw-solid ((self solid-mixin)
 			  (scene krma:krma-essential-scene-mixin)
-			  (shape oc::topods-compound)
+			  (shape oc2::topo-ds_compound)
 			  &key (group :default)
 			    (color #xffffff)
 			    (material krma::*default-material*)
 			    (show-edges? t)
-			    (mesh (make-instance 'oc::BRep-Mesh-Incremental-Mesh
-						 :theShape shape
-						 :theLinDeflection 2.0d-2
-						 :theAngDeflection 1.0d-1
-						 :isRelative t
-						 :isInParallel t))
+			    (mesh (make-instance 'oc2::B-Rep-Mesh_Incremental-Mesh
+						 :the-Shape shape
+						 :the-Lin-Deflection 2.0d-2
+						 :the-Ang-Deflection 1.0d-1
+						 :is-Relative t
+						 :is-In-Parallel t))
+			  &allow-other-keys)
+  (mapcar #'(lambda (shape)
+	      (rm-draw-solid self scene shape
+			     :group group
+			     :color color
+			     :material material
+			     :show-edges? show-edges?
+			     :mesh mesh))
+	  (topods-children shape))
+
+  (values))
+
+(defmethod rm-draw-solid ((self solid-mixin)
+			  (scene krma:krma-essential-scene-mixin)
+			  (shape oc2::topo-ds_solid)
+			  &key (group :default)
+			    (color #xffffff)
+			    (material krma::*default-material*)
+			    (show-edges? t)
+			    (mesh (make-instance 'oc2::B-Rep-Mesh_Incremental-Mesh
+						 :the-Shape shape
+						 :the-Lin-Deflection 2.0d-2
+						 :the-Ang-Deflection 1.0d-1
+						 :is-Relative t
+						 :is-In-Parallel t))
 			  &allow-other-keys)
   (mapcar #'(lambda (shape)
 	      (rm-draw-solid self scene shape
@@ -2303,41 +2351,17 @@
 
 (defmethod rm-draw-solid ((self solid-mixin)
 			  (scene krma:krma-essential-scene-mixin)
-			  (shape oc::topods-solid)
+			  (shape oc2::topo-ds_shell)
 			  &key (group :default)
 			    (color #xffffff)
 			    (material krma::*default-material*)
 			    (show-edges? t)
-			    (mesh (make-instance 'oc::BRep-Mesh-Incremental-Mesh
-						 :theShape shape
-						 :theLinDeflection 2.0d-2
-						 :theAngDeflection 1.0d-1
-						 :isRelative t
-						 :isInParallel t))
-			  &allow-other-keys)
-  (mapcar #'(lambda (shape)
-	      (rm-draw-solid self scene shape
-			     :group group
-			     :color color
-			     :material material
-			     :show-edges? show-edges?
-			     :mesh mesh))
-	  (topods-children shape))
-  (values))
-
-(defmethod rm-draw-solid ((self solid-mixin)
-			  (scene krma:krma-essential-scene-mixin)
-			  (shape oc::topods-shell)
-			  &key (group :default)
-			    (color #xffffff)
-			    (material krma::*default-material*)
-			    (show-edges? t)
-			    (mesh (make-instance 'oc::BRep-Mesh-Incremental-Mesh
-						 :theShape shape
-						 :theLinDeflection 2.0d-2
-						 :theAngDeflection 1.0d-1
-						 :isRelative t
-						 :isInParallel t))
+			    (mesh (make-instance 'oc2::B-Rep-Mesh_Incremental-Mesh
+						 :the-Shape shape
+						 :the-Lin-Deflection 2.0d-2
+						 :the-Ang-Deflection 1.0d-1
+						 :is-Relative t
+						 :is-In-Parallel t))
 			  &allow-other-keys)
   (let ((faces (topods-children shape)))
     (mapcar #'(lambda (shape)
@@ -2352,23 +2376,29 @@
 				    (let ((wires (topods-children face)))
 				      (apply #'append (mapcar #'topods-children wires))))
 				faces)))
-	(let ((exp (make-instance 'oc::top-exp-explorer
+	(let ((exp (make-instance 'oc2::top-exp_explorer
 				  :S shape
-				  :ToFind :topabs_edge)))
-	  (loop while (oc::more-p exp)
-		do (let* ((edge (oc::current exp))
-			  (face (nth (position edge face-edges :test #'member) faces)))
+				  :To-Find oc2::+top-abs_edge+
+				  :to-avoid oc2::+top-abs_shape+)))
+	  (loop while (this::more-0 exp)
+		do (let* ((edge (with-topods-shape (this::current-0 exp)))
+			  (pos (position (topods-shape-hash-code edge)
+					 (mapcar #'(lambda (list)
+						     (mapcar #'topods-shape-hash-code list))
+						 face-edges)
+					 :test #'member))
+			  (face (nth pos faces)))
 		     (rm-draw-solid self scene edge
 				    :face face
 				    :group group
 				    :color #x000000ff
 				    :mesh mesh))
-		   (oc::next exp))))))			      
+		   (this::next-0 exp))))))			      
   (values))
 
 (defmethod rm-draw-solid ((self solid-mixin)
 			  (scene krma:krma-essential-scene-mixin)
-			  (shape oc::topods-face)
+			  (shape oc2::topo-ds_face)
 			  &key (group :default)
 			    (color #xffffff)
 			    (material krma::*default-material*)
@@ -2380,7 +2410,7 @@
 
 (defmethod rm-draw-solid ((self solid-mixin)
 			  (scene krma:krma-essential-scene-mixin)
-			  (shape oc::topods-edge)
+			  (shape oc2::topo-ds_edge)
 			  &key (group :default)
 			    (color #x000000ff)
 			    face
@@ -2390,51 +2420,45 @@
 	  (send shape climish::primitive-handles)))
   (values))
 
-krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge face)
-	(declare (type krma-essential-scene-mixin scene))
-	(declare (type (and atom t) group))
-	(declare (type oc::topods-edge edge))
-	(declare (type oc::topods-face face))
-	(declare (type (or mat4 null) model-matrix))
-	(let ((vertices (let* ((hpt (rgn-geo::oc-face-triangulation face))
-			       (hpolygon (oc::_wrap_BRep_Tool_PolygonOnTriangulation__SWIG_0
-					  (oc::ff-pointer edge)
-					  hpt
-					  (oc::_wrap_new_TopLoc_Location__SWIG_0)))
-			       (polygon (cffi::mem-aref hpolygon :pointer))
-			       (nodes (oc::_wrap_Poly_PolygonOnTriangulation_Nodes polygon))
-			       (lower (OC::_WRAP_TCOLSTD_ARRAY1OFINTEGER_LOWER nodes))
-			       (upper (OC::_WRAP_TCOLSTD_ARRAY1OFINTEGER_Upper nodes))
-			       (pt (cffi::mem-aref hpt :pointer))
-			       (coordinates (oc::poly_triangulation_node_array_pointer pt))
-			       (clower (oc::poly_triangulation_node_array_lower pt)))
-			  (loop for i from lower to upper
-				nconc (let* ((index (oc::_wrap_TColStd_Array1OfInteger_value nodes i))
-					     (offset (* 3 (- index clower))))
-					(list
-					 (clampf (cffi:mem-aref coordinates :double offset))
-					 (clampf (cffi:mem-aref coordinates :double (1+ offset)))
-					 (clampf (cffi:mem-aref coordinates :double (+ 2 offset))))))))
-		
-	      (ub32-oid (oc::_wrap_topods_shape_hashcode (oc::ff-pointer edge)
-							 (load-time-value (1- (expt 2 31))))))
-	  (scene-add-filled-3d-instanced-tube-primitive
-	   scene group model-matrix nil 2 color vertices ub32-oid)))
-
+(defun topods-shape-hash-code (topods-shape)
+  (let ((smh (make-instance 'oc2::top-tools_shape-map-hasher)))
+    (mod (c++::call!-2 smh topods-shape) #.(expt 2 31))))
 
 (in-package :krma)
+
+(defun scene-add-opencascade-edge (scene group model-matrix color edge face)
+  (declare (type krma-essential-scene-mixin scene))
+  (declare (type (and atom t) group))
+  (declare (type oc2::topo-ds_edge edge))
+  (declare (type oc2::topo-ds_face face))
+  (declare (type (or mat4 null) model-matrix))
+  (let* ((hpt (rgn-geo::oc-face-triangulation face))
+         (hpolygon (b-rep_tool::polygon-on-triangulation-3
+                    edge hpt
+                    (make-instance 'oc2::top-loc_location)))
+         (polygon (this::get-0 hpolygon))
+         (pt (this::get-0 hpt))
+         (vertices
+           (loop for i from 1 to (this::nb-nodes-0 polygon)
+                 for index = (this::node-1 polygon i)
+                 for coord = (this::node-1 pt index)
+                 nconc (list (clampf (this::x-0 coord))
+                             (clampf (this::y-0 coord))
+                             (clampf (this::z-0 coord)))))
+         (ub32-oid (rgn-geo::topods-shape-hash-code edge)))
+    (scene-add-filled-3d-instanced-tube-primitive
+     scene group model-matrix nil 2 color vertices ub32-oid)))
 
 (defun scene-add-diffuse-opencascade-face (scene group model-matrix color material face)
 	(declare (type krma-essential-scene-mixin scene))
 	(declare (type (and atom t) group))
-	(declare (type oc::topods-face face))
+	(declare (type oc2::topo-ds_face face))
 	(declare (type (or mat4 null) model-matrix))
 	(declare (type (or standard-material null) material))
 	(setq color (canonicalize-color color))
 	(rgn-geo::oc-face-triangulation face)
-	(let ((ub32-oid (oc::_wrap_topods_shape_hashcode (oc::ff-pointer face)
-							 (load-time-value (1- (expt 2 31)))))
-	      (orientation (OC::_WRAP_TOPODS_SHAPE_ORIENTATION__SWIG_0 (oc::ff-pointer face))))
+	(let ((ub32-oid (rgn-geo::topods-shape-hash-code face))
+	      (orientation (this::orientation-0 face)))
 	  (setf (krma::object-from-id ub32-oid) face)
 	  (rm-dispatch-to-render-thread-with-handle (scene draw-data handle)
 	    (%draw-data-add-diffuse-opencascade-face
@@ -2453,95 +2477,144 @@ krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge fac
 	   draw-list cmd-vector topods-face ub32-oid atom-group model-mtx ub32-color material orientation))))
 
 (defun %draw-list-add-diffuse-opencascade-face
-	  (3d-draw-list cmd-vector topods-face ub32-oid atom-group model-mtx ub32-color material orientation)
-	(declare (type 3d-vertex-with-normal-draw-list-mixin 3d-draw-list))
-	(declare (type (unsigned-byte 32) ub32-oid ub32-color))
-	(let* ((index-array (draw-list-index-array 3d-draw-list))
-	       (vertex-array (draw-list-vertex-array 3d-draw-list))
-	       (vtx-offset (foreign-array-fill-pointer vertex-array))
-	       (first-index (foreign-array-fill-pointer index-array)))
-	  (with-draw-list-transaction (%draw-list-add-diffuse-opencascade-face
-				       3d-draw-list first-index vtx-offset)
-	    (let* ((hpt (rgn-geo::oc-face-triangulation topods-face))
-		   (pt (cffi:mem-aref hpt :pointer))
-		   (n-tris (oc::poly_triangulation_nb_triangles pt))
-		   (n-nodes (oc::poly_triangulation_nb_nodes pt))
-		   (tri-array (oc::poly_triangulation_triangles_array_pointer pt))
-		   (node-array (oc::poly_triangulation_node_array_pointer pt))
-		   (lower (oc::poly_triangulation_node_array_lower pt))
-		   (normals-array (oc::poly_triangulation_normal_array_pointer pt)))
-	      (if (eq orientation :topabs_reversed)
-		  (loop repeat n-nodes
-			for j from 0
-			do (let* ((i (* 3 j))
-				  (1+i (1+ i))
-				  (2+i (+ 2 i)))
-			     (standard-3d-vertex-with-normal-array-push-extend
-			      vertex-array ub32-oid
-			      (clampf (cffi:mem-aref node-array :double i))
-			      (clampf (cffi:mem-aref node-array :double 1+i))
-			      (clampf (cffi:mem-aref node-array :double 2+i))
-			      (- (cffi:mem-aref normals-array :float i))
-			      (- (cffi:mem-aref normals-array :float 1+i))
-			      (- (cffi:mem-aref normals-array :float 2+i))
-			      ub32-color)))
-		  (loop repeat n-nodes
-			for j from 0
-			do (let* ((i (* 3 j))
-				  (1+i (1+ i))
-				  (2+i (+ 2 i)))
-			     (standard-3d-vertex-with-normal-array-push-extend
-			      vertex-array ub32-oid
-			      (clampf (cffi:mem-aref node-array :double i))
-			      (clampf (cffi:mem-aref node-array :double 1+i))
-			      (clampf (cffi:mem-aref node-array :double 2+i))
-			      (cffi:mem-aref normals-array :float i)
-			      (cffi:mem-aref normals-array :float 1+i)
-			      (cffi:mem-aref normals-array :float 2+i)
-			      ub32-color))))
-	      (loop repeat n-tris
-		    for j from 0
-		    do (let* ((i (* 3 j))
-			      (1+i (1+ i))
-			      (2+i (+ 2 i)))
-			 (index-array-push-extend index-array (- (cffi:mem-aref tri-array :int i) lower))
-			 (index-array-push-extend index-array (- (cffi:mem-aref tri-array :int 1+i) lower))
-			 (index-array-push-extend index-array (- (cffi:mem-aref tri-array :int 2+i) lower))))
-	      (let ((cmd (make-standard-draw-indexed-cmd
-			  3d-draw-list
-			  first-index (* 3 n-tris) vtx-offset
-			  atom-group model-mtx
-			  nil *white-texture* nil nil material)))
-		(vector-push-extend cmd cmd-vector)
-		cmd)))))
+    (3d-draw-list cmd-vector topods-face ub32-oid atom-group model-mtx ub32-color material orientation)
+  (declare (type 3d-vertex-with-normal-draw-list-mixin 3d-draw-list))
+  (declare (type (unsigned-byte 32) ub32-oid ub32-color))
+  (let* ((index-array (draw-list-index-array 3d-draw-list))
+	 (vertex-array (draw-list-vertex-array 3d-draw-list))
+	 (vtx-offset (foreign-array-fill-pointer vertex-array))
+	 (first-index (foreign-array-fill-pointer index-array)))
+    (with-draw-list-transaction (%draw-list-add-diffuse-opencascade-face
+				 3d-draw-list first-index vtx-offset)
+      (let* ((hpt (rgn-geo::oc-face-triangulation topods-face))
+	     (pt (this::get-0 hpt))
+	     (n-tris (this::nb-triangles-0 pt))
+	     (n-nodes (this::nb-nodes-0 pt))
+	     (hnode-array (this::map-node-array-0 pt))
+	     (node-array (this::get-0 hnode-array))
+	     (node-lower (this::lower-0 node-array)))
+	
+	#+NIL
+	(format t "~&Node lower: ~D, node count: ~D~%"
+		node-lower n-nodes)
+	(if (eq (c++-abi::v orientation) #.(c++-abi::v oc2::+top-abs_reversed+))
+	    (loop repeat n-nodes
+		  for i from 1
+		  for j from node-lower
+		  do (let* ((node (this::value-1 node-array j))
+			    (norm (this::normal-1 pt i)))
+		       #+NIL
+		       (when (= j node-lower)
+			 (format t "~&Mapped: ~A ~A ~A~%"
+				 (this::x-0 node)
+				 (this::y-0 node)
+				 (this::z-0 node))
+			 (format t "~&Direct: ~A ~A ~A~%"
+				 (this::x-0 direct)
+				 (this::y-0 direct)
+				 (this::z-0 direct)))
+		       (standard-3d-vertex-with-normal-array-push-extend
+			vertex-array ub32-oid
+			(clampf (this::x-0 node))
+			(clampf (this::y-0 node))
+			(clampf (this::z-0 node))
+			 (clampf (- (this::x-0 norm)))
+			  (clampf (- (this::y-0 norm)))
+			   (clampf (- (this::z-0 norm)))
+			ub32-color)))
+	    (loop repeat n-nodes
+		  for i from 1
+		  for j from node-lower
+		  do (let* ((node (this::value-1 node-array j))
+			    (norm (this::normal-1 pt i)))
+		       #+NIL
+		       (when (= j node-lower)
+			 (format t "~&Mapped: ~A ~A ~A~%"
+				 (this::x-0 node)
+				 (this::y-0 node)
+				 (this::z-0 node))
+			 (format t "~&Direct: ~A ~A ~A~%"
+				 (this::x-0 direct)
+				 (this::y-0 direct)
+				 (this::z-0 direct)))
+		       (standard-3d-vertex-with-normal-array-push-extend
+			vertex-array ub32-oid
+			(clampf (this::x-0 node))
+			(clampf (this::y-0 node))
+			(clampf (this::z-0 node))
+			(clampf (this::x-0 norm))
+			(clampf (this::y-0 norm))
+			(clampf (this::z-0 norm))
+			ub32-color))))
+	(loop repeat n-tris
+	      for j from 1
+	      do (let* ((triangle (this::triangle-1 pt j)))
+		   #+NIL
+		   (progn
+		     (format t "~&Triangles: ~D  Nodes: ~D~%"
+			     n-tris n-nodes)
+		     (format t "Triangle 1: ~D ~D ~D~%" a b c)
+		     (format t "Valid indices: ~A~%"
+			     (and (<= 1 a n-nodes)
+				  (<= 1 b n-nodes)
+				  (<= 1 c n-nodes))))
+		   (index-array-push-extend index-array (- (this::value-1 triangle 1) 1))
+		   (index-array-push-extend index-array (- (this::value-1 triangle 2) 1))
+		   (index-array-push-extend index-array (- (this::value-1 triangle 3) 1))))
+	(let ((cmd (make-standard-draw-indexed-cmd
+		    3d-draw-list
+		    first-index (* 3 n-tris) vtx-offset
+		    atom-group model-mtx
+		    nil *white-texture* nil nil material)))
+	  (vector-push-extend cmd cmd-vector)
+	  cmd)))))
   
 (in-package :rgn-geo)
 
 (defun make-opencascade-wire (oc-edges)
-  (let ((mw (make-instance 'oc::brep-builder-api-make-wire)))
+  (let ((mw (make-instance 'oc2::b-rep-builder-api_make-wire)))
     (loop for edge in oc-edges
-	  do (oc::add mw edge)
-	  finally (return (when (oc::done? mw) (oc::wire mw))))))
+	  do (this::add-1 mw edge)
+	  finally
+	     (return (when (this::is-done-0 mw) (this::wire-0 mw))))))
 
 (defun make-opencascade-edge (oc-curve)
-  (oc::edge (make-instance 'oc::BRep-Builder-API-make-edge :L oc-curve)))
+  (this::edge-0 (make-instance 'oc2::B-Rep-Builder-API_make-edge
+			       :L (change-wrapper
+				   oc-curve
+				   (load-time-value (find-class 'opencascade::handle<geom_curve>))))))
 
-(defclass oc::topods-face (oc::topods-shape)
-  ((triangulation :initform nil)
+(c++::defclass rgn-geo::topods-compound (oc2::topo-ds_compound)
+  ((mesh :initform nil)
+   (group :initform :default)
+   (color :initform #xffffff)
+   (material :initform krma::*default-material*)
+   (show-edges?)))
+
+(c++::defclass rgn-geo::topods-solid (oc2::topo-ds_solid)
+  ((mesh :initform nil)
+   (group :initform :default)
+   (color :initform #xffffff)
+   (material :initform krma::*default-material*)
+   (show-edges?)))
+
+(c++::defclass rgn-geo::topods-face (oc2::topo-ds_face)
+  ((rgn-geo::triangulation :initform nil)
    (climish::primitive-handles :initform nil)))
 
-(defclass oc::topods-edge (oc::topods-shape)
+
+(c++::defclass topods-edge (oc2::topo-ds_edge)
   ((climish::primitive-handles :initform nil)))
 
 (defun oc-face-triangulation (topods-face)
-  (let ((triangulation (slot-value topods-face 'triangulation)))
-    (or triangulation
-	(setf (slot-value topods-face 'triangulation)
-	      (let ((tri
-		      (oc::_wrap_BRep_Tool_Triangulation (oc::ff-pointer topods-face)
-							 (oc::_wrap_new_TopLoc_Location__SWIG_0))))
-		(oc::_wrap_poly_computenormals tri)
-		tri)))))
+  (or (slot-value topods-face 'triangulation)
+      (setf (slot-value topods-face 'triangulation)
+	    (let ((tri (b-rep_tool::triangulation-3
+			topods-face
+			(make-instance 'oc2::top-loc_location)
+			#.(c++-abi::v oc2::+poly_mesh-purpose_none+))))
+	      (poly::compute-normals-1 tri)
+	      tri))))
 
 (defobject profile (solid-mixin entity-mixin)
   :inputs
@@ -2565,19 +2638,19 @@ krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge fac
 				(mapcar #'make-opencascade-edge
 					(mapcar #'to-opencascade list))))
 			   (the inner-loops)))
-   (body (let* ((f (oc::face (make-instance 'oc::BRep-Builder-API-Make-Face
+   (body (let* ((f (this::face-0 (make-instance 'oc2::B-Rep-Builder-API_Make-Face
 					    :W (the oc-outer-loop)
-					    :OnlyPlane t)))
-		(mf (make-instance 'oc::BRep-Builder-API-Make-Face :F f)))
+					    :Only-Plane t)))
+		(mf (make-instance 'oc2::B-Rep-Builder-API_Make-Face :F f)))
 	   (loop for w in (the oc-inner-loops)
-		 do (oc::Add mf w)
-		 finally (return (let ((face (oc::face mf)))
-				   (make-instance 'oc::BRep-Mesh-Incremental-Mesh
-						  :theShape face
-						  :theLinDeflection 2.0d-2
-						  :theAngDeflection 1.0d-1
-						  :isRelative t
-						  :isInParallel t)
+		 do (this::add-1 mf w)
+		 finally (return (let ((face (with-topods-shape (this::face-0 mf))))
+				   (make-instance 'oc2::B-Rep-Mesh_Incremental-Mesh
+						  :the-Shape face
+						  :the-Lin-Deflection 2.0d-2
+						  :the-Ang-Deflection 1.0d-1
+						  :is-Relative t
+						  :is-In-Parallel t)
 				   (oc-face-triangulation face)
 				   face)))))))
 
@@ -2587,12 +2660,27 @@ krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge fac
    (vector (:validator (assure-double-vec3 value))))
 
   :attributes
-  ((body (oc::shape (make-instance 'oc::BRep-Prim-API-Make-Prism
+  ((body (with-topods-shape (this::shape-0 (make-instance 'oc2::B-Rep-Prim-API_Make-Prism
 				   :Copy t
-				   :baseShape (the profile body)
+				   :s (the profile body)
 				   :Canonize t
-				   :extrudeDirection (let ((v (the vector)))
-						       (gp:vec (vx v) (vy v) (vz v))))))))
+				   :v (let ((v (the vector)))
+					(make-instance 'oc2::gp_vec
+						       :the-xv (vx v)
+						       :the-yv (vy v)
+						       :the-zv (vz v)))))))))
+
+
+(defun change-wrapper (instance to-class)
+  (when (symbolp to-class)
+    (setq to-class (find-class to-class)))
+  (let ((new-wrapper (allocate-instance to-class)))
+    (setf (c++-abi::p new-wrapper) (c++-abi::p instance)
+	  (c++-abi::owner new-wrapper) (c++-abi::owner instance)
+	  (c++-abi::array-info new-wrapper) (c++-abi::array-info instance))
+    new-wrapper))
+
+(c++::defclass oc2::top-tools_list-of-shape (oc2::n-collection_list<topo-ds_shape>) ())
 
 (defobject subtraction (solid-mixin entity-mixin)
   :inputs
@@ -2605,24 +2693,29 @@ krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge fac
 				     elt)
 			   value))))
   :attributes
-  ((oc-objects (let ((list (make-instance 'oc::top-tools-list-of-shape)))
+  ((oc-objects (let ((list (make-instance 'oc2::top-tools_list-of-shape)))
 		 (loop for solid in (the objects)
-		       do (oc::list-append list (send solid body))
+		       do (this::append-1 list (send solid body))
 		       finally (return list))))
-   (oc-tools (let ((list (make-instance 'oc::top-tools-list-of-shape)))
+   (oc-tools (let ((list (make-instance 'oc2::top-tools_list-of-shape)))
 	       (loop for solid in (the tools)
-		     do (oc::list-append list (send solid body))
+		     do (this::append-1 list (send solid body))
 		     finally (return list))))
-   (builder (oc::_wrap_new_BRepAlgoAPI_Cut__SWIG_0))
+   (builder (make-instance 'oc2::b-rep-algo-api_cut))
    (body (let ((builder (the builder)))
-	    (oc::_wrap_BRepAlgoAPI_Algo_SetRunParallel builder t)
-	    (oc::_wrap_BRepAlgoAPI_BuilderAlgo_SetFuzzyValue builder 2.1d-5)
-	    (oc::_wrap_BRepAlgoAPI_BuilderAlgo_SetArguments builder (oc::ff-pointer (the oc-objects)))
-	    (oc::_wrap_BRepAlgoAPI_BooleanOperation_SetTools builder (oc::ff-pointer (the oc-tools)))
-	    (oc::_wrap_BRepAlgoAPI_BuilderAlgo_Build builder)
-	    (oc::with-topods-shape (oc::_wrap_BRepAlgoAPI_Algo_Shape builder))))))
+	    (this::set-run-parallel-1 builder nil)
+	    (this::set-fuzzy-value-1 builder 2.1d-5)
+	    (this::set-arguments-1 builder (the oc-objects))
+	    (this::set-tools-1 builder (the oc-tools))
+	   (this::build-1 builder (make-instance 'oc2::message_progress-range))
+	   (let ((shape (make-instance 'oc2::topo-ds_shape)))
+	     (with-topods-shape (c++::= shape (this::shape-0 builder))))))))
+
+(defparameter *topods-shapes-table* (make-hash-table))
+
+
 	    
-	    
+
 						    
   
 (defobject block-mixin (group-owner-mixin node-mixin))
@@ -2644,13 +2737,26 @@ krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge fac
 
   :attributes
   ((origin (v+ (the center-on) (safe-euclid (m* (the rotation-matrix) (vec4 0 0 (- (half (the height))) 1.0d0)))))
-   (oc-normal (gp:dir (vx (the :bottom-circle normal)) (vy (the :bottom-circle normal)) (vz (the :bottom-circle normal))))
-   (oc-center (gp:pnt (vx (the :bottom-circle center)) (vy (the :bottom-circle center)) (vz (the :bottom-circle center))))
-   (oc-ax2 (gp:ax2 :p (the oc-center) :n (the oc-normal)))
-   (oc-solid (oc::shape (make-instance 'oc::brep-prim-api-make-cylinder
-				      :axes (the oc-ax2)
-				      :h (coerce (the height) 'double-float)
-				      :r (coerce (the radius) 'double-float)))))
+   (oc-normal (make-instance 'oc2::gp_dir
+			     :the-xv (vx (the :bottom-circle normal))
+			     :the-yv (vy (the :bottom-circle normal))
+			     :the-zv (vz (the :bottom-circle normal))))
+   (oc-center (make-instance 'oc2::gp_pnt
+			     :the-xp (vx (the :bottom-circle center))
+			     :the-yp (vy (the :bottom-circle center))
+			     :the-zp (vz (the :bottom-circle center))))
+   (gpvx (make-instance 'oc2::gp_dir
+			     :the-xv 1.0d0
+			     :the-yv 0.0d0
+			     :the-zv 0.0d0))
+   (oc-ax2 (make-instance 'oc2::gp_ax-2
+			  :p (the oc-center)
+			  :n (the oc-normal)
+			  :vx (the gpvx)))
+   (oc-solid (with-topods-shape (this::shape-0 (make-instance 'oc2::b-rep-prim-api_make-cylinder
+					   :axes (the oc-ax2)
+					   :h (coerce (the height) 'double-float)
+					   :r (coerce (the radius) 'double-float))))))
   
   :components
   ((:bottom-circle :type '3d-circle_a
@@ -2689,10 +2795,10 @@ krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge fac
 (defobject hollow-cylinder_b (cylinder_b)
   :inputs ((thickness 0.1d0))
   :attributes
-  ((oc-solid-2 (oc::shape (make-instance 'oc::brep-prim-api-make-cylinder
-				      :axes (the oc-ax2)
-				      :h (coerce (the height) 'double-float)
-				      :r (coerce (- (the radius) (the thickness)) 'double-float)))))
+  ((oc-solid-2 (with-topods-shape (this::shape-0 (make-instance 'oc2::b-rep-prim-api_make-cylinder
+					     :axes (the oc-ax2)
+					     :h (coerce (the height) 'double-float)
+					     :r (coerce (- (the radius) (the thickness)) 'double-float))))))
 
   :components
   ((:bottom-circle-2 :type '3d-circle_a
@@ -4002,22 +4108,18 @@ krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge fac
 		(safe-euclid (m* (the %inv-plane-rotation-matrix) (vec4 (vx p) (vy p) (vz p) 1.0d0)))))))
 
 (defmethod to-opencascade ((self 3d-circle-mixin))
-  (let* ((start-and-end (gp:pnt (vx (the %start-and-end)) (vy (the %start-and-end)) (vz (the %start-and-end))))
-	 (interior (gp:pnt (vx (the %interior)) (vy (the %interior)) (vz (the %interior))))
-	 (normal (gp:dir (vx (the normal)) (vy (the normal)) (vz (the normal))))
-	 (center (gp:pnt (vx (the center)) (vy (the center)) (vz (the center))))
-	 (ax2 (gp:ax2 :p center :n normal))
-	 (circ (gp:circ :a2 ax2 :r (the radius))))
-    (list (oc::value (make-instance 'oc::gc-make-arc-of-circle
-				    :p1 start-and-end
-				    :p2 interior
-				    :circ circ
-				    :sense t))
-	  (oc::value (make-instance 'oc::gc-make-arc-of-circle
-				    :p1 interior
-				    :p2 start-and-end
-				    :circ circ
-				    :sense t)))))
+  (let* ((normal (make-instance 'oc2::gp_dir
+				:the-xv (vx (the normal))
+				:the-yv (vy (the normal))
+				:the-zv (vz (the normal))))
+	 (center (make-instance 'oc2::gp_pnt
+				:the-xp (vx (the center))
+				:the-yp (vy (the center))
+				:the-zp (vz (the center))))
+	 (ax2 (make-instance 'oc2::gp_ax-2 :p center :n normal))
+	 (circ (make-instance 'oc2::gp_circ :a2 ax2 :r (the radius))))
+    (this::value-0 (make-instance 'oc2::gc_make-circle
+				  :the-circ circ))))
   
   
 
@@ -4205,3 +4307,43 @@ krma::(defun scene-add-opencascade-edge (scene group model-matrix color edge fac
 	start (vec3 1 0 0)
 	interior (vec3 0 0 1)
 	end (vec3 0 1 0))))
+
+#+NIL
+(defun with-topods-shape (shape)
+  (when (c++-abi::? shape)
+    (let* ((hash-code (topods-shape-hash-code shape))
+	   (instance (gethash hash-code *topods-shapes-table*)))
+      (if instance
+	  instance
+	  (let* ((shape-class
+		   (case (c++-abi::v (this::shape-type-0 shape))
+		     (#.(c++-abi::v oc2::+Top-Abs_COMPOUND+) (load-time-value (find-class 'topods-compound)))
+		     (#.(c++-abi::v oc2::+Top-Abs_COMPSOLID+) (load-time-value (find-class 'oc2::topo-ds_comp-solid)))
+		     (#.(c++-abi::v oc2::+Top-Abs_SOLID+) (load-time-value (find-class 'topods-solid)))
+		     (#.(c++-abi::v oc2::+Top-Abs_SHELL+) (load-time-value (find-class 'oc2::topo-ds_shell)))
+		     (#.(c++-abi::v oc2::+Top-Abs_FACE+) (load-time-value (find-class 'topods-face)))
+		     (#.(c++-abi::v oc2::+Top-Abs_WIRE+) (load-time-value (find-class 'oc2::topo-ds_wire)))
+		     (#.(c++-abi::v oc2::+Top-Abs_EDGE+) (load-time-value (find-class 'topods-edge)))
+		     (#.(c++-abi::v oc2::+Top-Abs_VERTEX+) (load-time-value (find-class 'oc2::topo-ds_vertex)))
+		     (#.(c++-abi::v oc2::+Top-Abs_SHAPE+) (load-time-value (find-class 'oc2::topo-ds_shape)))))
+		 (shape (when shape-class (change-class shape shape-class))))
+	    (when shape-class
+	      (setf (gethash hash-code *topods-shapes-table*) shape)
+	      shape))))))
+
+(defun with-topods-shape (shape)
+  (when (c++-abi::? shape)
+    (let* ((shape-class
+	     (case (c++-abi::v (this::shape-type-0 shape))
+	       (#.(c++-abi::v oc2::+Top-Abs_COMPOUND+) (load-time-value (find-class 'topods-compound)))
+	       (#.(c++-abi::v oc2::+Top-Abs_COMPSOLID+) (load-time-value (find-class 'oc2::topo-ds_comp-solid)))
+	       (#.(c++-abi::v oc2::+Top-Abs_SOLID+) (load-time-value (find-class 'topods-solid)))
+	       (#.(c++-abi::v oc2::+Top-Abs_SHELL+) (load-time-value (find-class 'oc2::topo-ds_shell)))
+	       (#.(c++-abi::v oc2::+Top-Abs_FACE+) (load-time-value (find-class 'topods-face)))
+	       (#.(c++-abi::v oc2::+Top-Abs_WIRE+) (load-time-value (find-class 'oc2::topo-ds_wire)))
+	       (#.(c++-abi::v oc2::+Top-Abs_EDGE+) (load-time-value (find-class 'topods-edge)))
+	       (#.(c++-abi::v oc2::+Top-Abs_VERTEX+) (load-time-value (find-class 'oc2::topo-ds_vertex)))
+	       (#.(c++-abi::v oc2::+Top-Abs_SHAPE+) (load-time-value (find-class 'oc2::topo-ds_shape)))))
+	   (shape (when shape-class (change-class shape shape-class))))
+      (when shape-class
+	shape))))
