@@ -54,6 +54,97 @@
 (defun twice (number)
   (* number 2))
 
+(defun %topods-children (topods-shape)
+  (when (? topods-shape)
+    (let ((iterator (make-instance 'oc2::Topo-DS_Iterator :S topods-shape :cum-ori t :cum-loc t)))
+      (loop while (this::more-0 iterator)
+            collect (let ((shape (make-instance 'oc2::topo-ds_shape)))
+		      (c++::= shape (this::value-0 iterator))
+		      (prog1 (canonicalize-shape shape)
+			(this::next-0 iterator)))))))
+
+(defun shape-children (topods-shape)
+  (setf (slot-value topods-shape 'shape-children)
+	(%topods-children topods-shape)))
+
+(c++::defclass topods-compsolid (oc2::topo-ds_comp-solid)
+  ((adhoc-scene-graph::object-id :initform nil)
+   (shape-children :initform nil)))
+
+(c++::defclass topods-compound (oc2::topo-ds_compound)
+  ((adhoc-scene-graph::object-id :initform nil)
+   (shape-children :initform nil)
+   (mesh :initform nil)
+   (adhoc-scene-graph::group :initform :default)
+   (climish::color :initform #xffffff)
+   (material :initform krma::*default-material*)
+   (show-edges?)))
+
+(c++::defclass topods-solid (oc2::topo-ds_solid)
+  ((adhoc-scene-graph::object-id :initform nil)
+   (shape-children :initform nil)
+   (mesh :initform nil)
+   (adhoc-scene-graph::group :initform :default)
+   (climish::color :initform #xffffff)
+   (material :initform krma::*default-material*)
+   (show-edges?)))
+
+(c++::defclass topods-shell (oc2::topo-ds_shell)
+  ((adhoc-scene-graph::object-id :initform nil)
+   (shape-children :initform nil)))
+
+(c++::defclass topods-face (oc2::topo-ds_face)
+  ((adhoc-scene-graph::object-id :initform nil)
+   (shape-children :initform nil)
+   (rgn-geo::triangulation :initform nil)
+   (climish::primitive-handles :initform nil)))
+
+(c++::defclass topods-wire (oc2::topo-ds_wire)
+  ((adhoc-scene-graph::object-id :initform nil)
+   (shape-children :initform nil)))
+
+(c++::defclass topods-edge (oc2::topo-ds_edge)
+  ((adhoc-scene-graph::object-id :initform nil)
+   (shape-children :initform nil)
+   (climish::primitive-handles :initform nil)))
+
+(c++::defclass topods-vertex (oc2::topo-ds_vertex)
+  ((adhoc-scene-graph::object-id :initform nil)))
+
+
+(defparameter *topods-shapes-table* (make-hash-table :weakness :key-and-value))
+
+(defparameter *shape-map-hasher* nil)
+
+(defun shape-map-hasher ()
+  (or *shape-map-hasher* (setq *shape-map-hasher* (make-instance 'oc2::top-tools_shape-map-hasher))))
+
+(defun topods-shape-hash-code (topods-shape)
+  (let ((smh (shape-map-hasher)))
+    (c++::call!-2 smh topods-shape)))
+
+(defun canonicalize-shape (shape)
+  (when (c++-abi::? shape)
+    (let* ((hash-code (topods-shape-hash-code shape))
+	   (instance (gethash hash-code *topods-shapes-table*)))
+      (if instance
+	  instance
+	  (let* ((shape-class
+		   (case (c++-abi::v (this::shape-type-0 shape))
+		     (#.(c++-abi::v oc2::+Top-Abs_COMPOUND+) (load-time-value (find-class 'topods-compound)))
+		     (#.(c++-abi::v oc2::+Top-Abs_COMPSOLID+) (load-time-value (find-class 'topods-compsolid)))
+		     (#.(c++-abi::v oc2::+Top-Abs_SOLID+) (load-time-value (find-class 'topods-solid)))
+		     (#.(c++-abi::v oc2::+Top-Abs_SHELL+) (load-time-value (find-class 'topods-shell)))
+		     (#.(c++-abi::v oc2::+Top-Abs_FACE+) (load-time-value (find-class 'topods-face)))
+		     (#.(c++-abi::v oc2::+Top-Abs_WIRE+) (load-time-value (find-class 'topods-wire)))
+		     (#.(c++-abi::v oc2::+Top-Abs_EDGE+) (load-time-value (find-class 'topods-edge)))
+		     (#.(c++-abi::v oc2::+Top-Abs_VERTEX+) (load-time-value (find-class 'topods-vertex)))
+		     (#.(c++-abi::v oc2::+Top-Abs_SHAPE+) (load-time-value (find-class 'oc2::topo-ds_shape)))))
+		 (shape (when shape-class (change-class shape shape-class))))
+	    (when shape-class
+	      (setf (gethash hash-code *topods-shapes-table*) shape)
+	      shape))))))
+
 (defmacro intersection (entity-a entity-b pick)
   `(intersection-1 ,entity-a ,entity-b ,pick ,self))
 
@@ -2221,18 +2312,18 @@
 
 (defmethod rm-erase-solid ((self solid-mixin)
 			   (scene krma:krma-essential-scene-mixin)
-			   (shape oc2::topo-ds_compound)) ;; change this to rgn-geo::topods-compound
+			   (shape topods-compound))
   (mapcar #'(lambda (shape)
 	      (rm-erase-solid self scene shape))
-	  (topods-children shape))
+	  (slot-value shape 'shape-children))
   (values))
 
 (defmethod rm-erase-solid ((self solid-mixin)
 			   (scene krma:krma-essential-scene-mixin)
-			   (shape oc2::topo-ds_solid)) ;; change this to rgn-geo::topods-solid
+			   (shape topods-solid))
   (mapcar #'(lambda (shape)
 	      (rm-erase-solid self scene shape))
-	  (topods-children shape))
+	  (slot-value shape 'shape-children))
   (values))
 
 (defmethod rm-erase-solid ((self solid-mixin)
@@ -2240,13 +2331,13 @@
 			   (shape oc2::topo-ds_shell))
   (mapcar #'(lambda (shape)
 	      (rm-erase-solid self scene shape))
-	  (topods-children shape))
+	  (slot-value shape 'shape-children))
   (values))
 
 
 (defmethod rm-erase-solid ((self solid-mixin)
 			   (scene krma:krma-essential-scene-mixin)
-			   (shape oc2::topo-ds_face)) ;; change this to rgn-geo::topods-face
+			   (shape topods-face))
   (krma:delete-primitives scene (send shape climish::primitive-handles))
   (forget-object shape)
   (setf (send shape climish::primitive-handles) nil)
@@ -2290,19 +2381,11 @@
   
 
 
-(defun topods-children (topods-shape)
-  ;; somehow I have two of these functions, one in rgn/oc-integration.lisp
-  (when topods-shape
-    (let ((iterator (make-instance 'oc2::Topo-DS_Iterator :S topods-shape :cum-ori t :cum-loc t)))
-      (loop while (this::more-0 iterator)
-            collect (let ((shape (make-instance 'oc2::topo-ds_shape)))
-		      (c++::= shape (this::value-0 iterator))
-		      (prog1 (with-topods-shape shape)
-			(this::next-0 iterator)))))))
+
 
 (defmethod rm-draw-solid ((self solid-mixin)
 			  (scene krma:krma-essential-scene-mixin)
-			  (shape oc2::topo-ds_compound)
+			  (shape topods-compound)
 			  &key (group :default)
 			    (color #xffffff)
 			    (material krma::*default-material*)
@@ -2321,13 +2404,13 @@
 			     :material material
 			     :show-edges? show-edges?
 			     :mesh mesh))
-	  (topods-children shape))
+	  (shape-children shape))
 
   (values))
 
 (defmethod rm-draw-solid ((self solid-mixin)
 			  (scene krma:krma-essential-scene-mixin)
-			  (shape oc2::topo-ds_solid)
+			  (shape topods-solid)
 			  &key (group :default)
 			    (color #xffffff)
 			    (material krma::*default-material*)
@@ -2346,12 +2429,12 @@
 			     :material material
 			     :show-edges? show-edges?
 			     :mesh mesh))
-	  (topods-children shape))
+	  (shape-children shape))
   (values))
 
 (defmethod rm-draw-solid ((self solid-mixin)
 			  (scene krma:krma-essential-scene-mixin)
-			  (shape oc2::topo-ds_shell)
+			  (shape topods-shell)
 			  &key (group :default)
 			    (color #xffffff)
 			    (material krma::*default-material*)
@@ -2363,7 +2446,7 @@
 						 :is-Relative t
 						 :is-In-Parallel t))
 			  &allow-other-keys)
-  (let ((faces (topods-children shape)))
+  (let ((faces (shape-children shape)))
     (mapcar #'(lambda (shape)
 		(rm-draw-solid self scene shape
 			       :group group
@@ -2373,15 +2456,15 @@
 	    faces)
     (when show-edges?
       (let ((face-edges (mapcar #'(lambda (face)
-				    (let ((wires (topods-children face)))
-				      (apply #'append (mapcar #'topods-children wires))))
+				    (let ((wires (shape-children face)))
+				      (apply #'append (mapcar #'shape-children wires))))
 				faces)))
 	(let ((exp (make-instance 'oc2::top-exp_explorer
 				  :S shape
 				  :To-Find oc2::+top-abs_edge+
 				  :to-avoid oc2::+top-abs_shape+)))
 	  (loop while (this::more-0 exp)
-		do (let* ((edge (with-topods-shape (this::current-0 exp)))
+		do (let* ((edge (canonicalize-shape (this::current-0 exp)))
 			  (pos (position (topods-shape-hash-code edge)
 					 (mapcar #'(lambda (list)
 						     (mapcar #'topods-shape-hash-code list))
@@ -2398,7 +2481,7 @@
 
 (defmethod rm-draw-solid ((self solid-mixin)
 			  (scene krma:krma-essential-scene-mixin)
-			  (shape oc2::topo-ds_face)
+			  (shape topods-face)
 			  &key (group :default)
 			    (color #xffffff)
 			    (material krma::*default-material*)
@@ -2410,7 +2493,7 @@
 
 (defmethod rm-draw-solid ((self solid-mixin)
 			  (scene krma:krma-essential-scene-mixin)
-			  (shape oc2::topo-ds_edge)
+			  (shape topods-edge)
 			  &key (group :default)
 			    (color #x000000ff)
 			    face
@@ -2420,9 +2503,7 @@
 	  (send shape climish::primitive-handles)))
   (values))
 
-(defun topods-shape-hash-code (topods-shape)
-  (let ((smh (make-instance 'oc2::top-tools_shape-map-hasher)))
-    (mod (c++::call!-2 smh topods-shape) #.(expt 2 31))))
+
 
 (in-package :krma)
 
@@ -2445,25 +2526,29 @@
                  nconc (list (clampf (this::x-0 coord))
                              (clampf (this::y-0 coord))
                              (clampf (this::z-0 coord)))))
-         (ub32-oid (rgn-geo::topods-shape-hash-code edge)))
+         (ub32-oid (or (slot-value edge 'adhoc-scene-graph::object-id)
+		       (setf (slot-value edge 'adhoc-scene-graph::object-id)
+			     (adhoc-scene-graph::new-object-id)))))
     (scene-add-filled-3d-instanced-tube-primitive
      scene group model-matrix nil 2 color vertices ub32-oid)))
 
 (defun scene-add-diffuse-opencascade-face (scene group model-matrix color material face)
-	(declare (type krma-essential-scene-mixin scene))
-	(declare (type (and atom t) group))
-	(declare (type oc2::topo-ds_face face))
-	(declare (type (or mat4 null) model-matrix))
-	(declare (type (or standard-material null) material))
-	(setq color (canonicalize-color color))
-	(rgn-geo::oc-face-triangulation face)
-	(let ((ub32-oid (rgn-geo::topods-shape-hash-code face))
-	      (orientation (this::orientation-0 face)))
-	  (setf (krma::object-from-id ub32-oid) face)
-	  (rm-dispatch-to-render-thread-with-handle (scene draw-data handle)
-	    (%draw-data-add-diffuse-opencascade-face
-	     draw-data handle face group (when model-matrix (mcopy model-matrix))
-	     color material orientation ub32-oid))))
+  (declare (type krma-essential-scene-mixin scene))
+  (declare (type (and atom t) group))
+  (declare (type oc2::topo-ds_face face))
+  (declare (type (or mat4 null) model-matrix))
+  (declare (type (or standard-material null) material))
+  (setq color (canonicalize-color color))
+  (rgn-geo::oc-face-triangulation face)
+  (let ((ub32-oid (or (slot-value face 'adhoc-scene-graph::object-id)
+		      (setf (slot-value face 'adhoc-scene-graph::object-id)
+			    (adhoc-scene-graph::new-object-id))))
+	(orientation (this::orientation-0 face)))
+    (setf (krma::object-from-id ub32-oid) face)
+    (rm-dispatch-to-render-thread-with-handle (scene draw-data handle)
+      (%draw-data-add-diffuse-opencascade-face
+       draw-data handle face group (when model-matrix (mcopy model-matrix))
+       color material orientation ub32-oid))))
 
 (defun %draw-data-add-diffuse-opencascade-face
     (draw-data handle topods-face atom-group model-mtx ub32-color material orientation ub32-oid)
@@ -2584,27 +2669,7 @@
 				   oc-curve
 				   (load-time-value (find-class 'opencascade::handle<geom_curve>))))))
 
-(c++::defclass rgn-geo::topods-compound (oc2::topo-ds_compound)
-  ((mesh :initform nil)
-   (group :initform :default)
-   (color :initform #xffffff)
-   (material :initform krma::*default-material*)
-   (show-edges?)))
 
-(c++::defclass rgn-geo::topods-solid (oc2::topo-ds_solid)
-  ((mesh :initform nil)
-   (group :initform :default)
-   (color :initform #xffffff)
-   (material :initform krma::*default-material*)
-   (show-edges?)))
-
-(c++::defclass rgn-geo::topods-face (oc2::topo-ds_face)
-  ((rgn-geo::triangulation :initform nil)
-   (climish::primitive-handles :initform nil)))
-
-
-(c++::defclass topods-edge (oc2::topo-ds_edge)
-  ((climish::primitive-handles :initform nil)))
 
 (defun oc-face-triangulation (topods-face)
   (or (slot-value topods-face 'triangulation)
@@ -2644,7 +2709,7 @@
 		(mf (make-instance 'oc2::B-Rep-Builder-API_Make-Face :F f)))
 	   (loop for w in (the oc-inner-loops)
 		 do (this::add-1 mf w)
-		 finally (return (let ((face (with-topods-shape (this::face-0 mf))))
+		 finally (return (let ((face (canonicalize-shape (this::face-0 mf))))
 				   (make-instance 'oc2::B-Rep-Mesh_Incremental-Mesh
 						  :the-Shape face
 						  :the-Lin-Deflection 2.0d-2
@@ -2660,15 +2725,16 @@
    (vector (:validator (assure-double-vec3 value))))
 
   :attributes
-  ((body (with-topods-shape (this::shape-0 (make-instance 'oc2::B-Rep-Prim-API_Make-Prism
-				   :Copy t
-				   :s (the profile body)
-				   :Canonize t
-				   :v (let ((v (the vector)))
-					(make-instance 'oc2::gp_vec
-						       :the-xv (vx v)
-						       :the-yv (vy v)
-						       :the-zv (vz v)))))))))
+  ((body (canonicalize-shape
+	  (this::shape-0 (make-instance 'oc2::B-Rep-Prim-API_Make-Prism
+					:Copy t
+					:s (the profile body)
+					:Canonize t
+					:v (let ((v (the vector)))
+					     (make-instance 'oc2::gp_vec
+							    :the-xv (vx v)
+							    :the-yv (vy v)
+							    :the-zv (vz v)))))))))
 
 
 (defun change-wrapper (instance to-class)
@@ -2709,9 +2775,9 @@
 	    (this::set-tools-1 builder (the oc-tools))
 	   (this::build-1 builder (make-instance 'oc2::message_progress-range))
 	   (let ((shape (make-instance 'oc2::topo-ds_shape)))
-	     (with-topods-shape (c++::= shape (this::shape-0 builder))))))))
+	     (canonicalize-shape (c++::= shape (this::shape-0 builder))))))))
 
-(defparameter *topods-shapes-table* (make-hash-table))
+
 
 
 	    
@@ -2746,17 +2812,17 @@
 			     :the-yp (vy (the :bottom-circle center))
 			     :the-zp (vz (the :bottom-circle center))))
    (gpvx (make-instance 'oc2::gp_dir
-			     :the-xv 1.0d0
-			     :the-yv 0.0d0
-			     :the-zv 0.0d0))
+			:the-xv 1.0d0
+			:the-yv 0.0d0
+			:the-zv 0.0d0))
    (oc-ax2 (make-instance 'oc2::gp_ax-2
 			  :p (the oc-center)
 			  :n (the oc-normal)
 			  :vx (the gpvx)))
-   (oc-solid (with-topods-shape (this::shape-0 (make-instance 'oc2::b-rep-prim-api_make-cylinder
-					   :axes (the oc-ax2)
-					   :h (coerce (the height) 'double-float)
-					   :r (coerce (the radius) 'double-float))))))
+   (oc-solid (canonicalize-shape (this::shape-0 (make-instance 'oc2::b-rep-prim-api_make-cylinder
+							       :axes (the oc-ax2)
+							       :h (coerce (the height) 'double-float)
+							       :r (coerce (the radius) 'double-float))))))
   
   :components
   ((:bottom-circle :type '3d-circle_a
@@ -2795,40 +2861,41 @@
 (defobject hollow-cylinder_b (cylinder_b)
   :inputs ((thickness 0.1d0))
   :attributes
-  ((oc-solid-2 (with-topods-shape (this::shape-0 (make-instance 'oc2::b-rep-prim-api_make-cylinder
-					     :axes (the oc-ax2)
-					     :h (coerce (the height) 'double-float)
-					     :r (coerce (- (the radius) (the thickness)) 'double-float))))))
+  ((oc-solid-2 (canonicalize-shape
+		(this::shape-0 (make-instance 'oc2::b-rep-prim-api_make-cylinder
+					      :axes (the oc-ax2)
+					      :h (coerce (the height) 'double-float)
+					      :r (coerce (- (the radius) (the thickness)) 'double-float))))))
 
   :components
   ((:bottom-circle-2 :type '3d-circle_a
-		   center (vec3 0 0 0)
-		   normal (vec3 0 0 1)
-		   radius (- (the radius) (the thickness))
-		   visible? (eq (the display) :wireframe))
+		     center (vec3 0 0 0)
+		     normal (vec3 0 0 1)
+		     radius (- (the radius) (the thickness))
+		     visible? (eq (the display) :wireframe))
    (:top-circle-2 :type '3d-circle_a
-		center (vec3 (vx (the :bottom-circle-2 center))
-			     (vy (the :bottom-circle-2 center))
-			     (the height))
-		normal (the :bottom-circle-2 normal)
-		radius (the :bottom-circle-2 radius)
-		visible? (eq (the display) :wireframe))
+		  center (vec3 (vx (the :bottom-circle-2 center))
+			       (vy (the :bottom-circle-2 center))
+			       (the height))
+		  normal (the :bottom-circle-2 normal)
+		  radius (the :bottom-circle-2 radius)
+		  visible? (eq (the display) :wireframe))
    (line-1-2 :type 'line
-	   start (v+ (the :bottom-circle-2 center) (v* (the :bottom-circle-2 radius) (vec3 1 0 0)))
-	   end (v+ (the :top-circle-2 center) (v* (the :top-circle-2 radius) (vec3 1 0 0)))
-	   visible? (eq (the display) :wireframe))
+	     start (v+ (the :bottom-circle-2 center) (v* (the :bottom-circle-2 radius) (vec3 1 0 0)))
+	     end (v+ (the :top-circle-2 center) (v* (the :top-circle-2 radius) (vec3 1 0 0)))
+	     visible? (eq (the display) :wireframe))
    (line-2-2 :type 'line
-	   start (v+ (the :bottom-circle-2 center) (v* (the :bottom-circle-2 radius) (vec3 0 1 0)))
-	   end (v+ (the :top-circle-2 center) (v* (the :top-circle-2 radius) (vec3 0 1 0)))
-	   visible? (eq (the display) :wireframe))
+	     start (v+ (the :bottom-circle-2 center) (v* (the :bottom-circle-2 radius) (vec3 0 1 0)))
+	     end (v+ (the :top-circle-2 center) (v* (the :top-circle-2 radius) (vec3 0 1 0)))
+	     visible? (eq (the display) :wireframe))
    (line-3-2 :type 'line
-	   start (v+ (the :bottom-circle-2 center) (v* (the :bottom-circle-2 radius) (vec3 -1 0 0)))
-	   end (v+ (the :top-circle-2 center) (v* (the :top-circle-2 radius) (vec3 -1 0 0)))
-	   visible? (eq (the display) :wireframe))
+	     start (v+ (the :bottom-circle-2 center) (v* (the :bottom-circle-2 radius) (vec3 -1 0 0)))
+	     end (v+ (the :top-circle-2 center) (v* (the :top-circle-2 radius) (vec3 -1 0 0)))
+	     visible? (eq (the display) :wireframe))
    (line-4-2 :type 'line
-	   start (v+ (the :bottom-circle-2 center) (v* (the :bottom-circle-2 radius) (vec3 0 -1 0)))
-	   end (v+ (the :top-circle-2 center) (v* (the :top-circle-2 radius) (vec3 0 -1 0)))
-	   visible? (eq (the display) :wireframe))
+	     start (v+ (the :bottom-circle-2 center) (v* (the :bottom-circle-2 radius) (vec3 0 -1 0)))
+	     end (v+ (the :top-circle-2 center) (v* (the :top-circle-2 radius) (vec3 0 -1 0)))
+	     visible? (eq (the display) :wireframe))
    (s-1 :type 'solid-primitive-mixin
 	body (the oc-solid)
 	visible? nil)
@@ -4308,42 +4375,7 @@
 	interior (vec3 0 0 1)
 	end (vec3 0 1 0))))
 
-#+NIL
-(defun with-topods-shape (shape)
-  (when (c++-abi::? shape)
-    (let* ((hash-code (topods-shape-hash-code shape))
-	   (instance (gethash hash-code *topods-shapes-table*)))
-      (if instance
-	  instance
-	  (let* ((shape-class
-		   (case (c++-abi::v (this::shape-type-0 shape))
-		     (#.(c++-abi::v oc2::+Top-Abs_COMPOUND+) (load-time-value (find-class 'topods-compound)))
-		     (#.(c++-abi::v oc2::+Top-Abs_COMPSOLID+) (load-time-value (find-class 'oc2::topo-ds_comp-solid)))
-		     (#.(c++-abi::v oc2::+Top-Abs_SOLID+) (load-time-value (find-class 'topods-solid)))
-		     (#.(c++-abi::v oc2::+Top-Abs_SHELL+) (load-time-value (find-class 'oc2::topo-ds_shell)))
-		     (#.(c++-abi::v oc2::+Top-Abs_FACE+) (load-time-value (find-class 'topods-face)))
-		     (#.(c++-abi::v oc2::+Top-Abs_WIRE+) (load-time-value (find-class 'oc2::topo-ds_wire)))
-		     (#.(c++-abi::v oc2::+Top-Abs_EDGE+) (load-time-value (find-class 'topods-edge)))
-		     (#.(c++-abi::v oc2::+Top-Abs_VERTEX+) (load-time-value (find-class 'oc2::topo-ds_vertex)))
-		     (#.(c++-abi::v oc2::+Top-Abs_SHAPE+) (load-time-value (find-class 'oc2::topo-ds_shape)))))
-		 (shape (when shape-class (change-class shape shape-class))))
-	    (when shape-class
-	      (setf (gethash hash-code *topods-shapes-table*) shape)
-	      shape))))))
 
-(defun with-topods-shape (shape)
-  (when (c++-abi::? shape)
-    (let* ((shape-class
-	     (case (c++-abi::v (this::shape-type-0 shape))
-	       (#.(c++-abi::v oc2::+Top-Abs_COMPOUND+) (load-time-value (find-class 'topods-compound)))
-	       (#.(c++-abi::v oc2::+Top-Abs_COMPSOLID+) (load-time-value (find-class 'oc2::topo-ds_comp-solid)))
-	       (#.(c++-abi::v oc2::+Top-Abs_SOLID+) (load-time-value (find-class 'topods-solid)))
-	       (#.(c++-abi::v oc2::+Top-Abs_SHELL+) (load-time-value (find-class 'oc2::topo-ds_shell)))
-	       (#.(c++-abi::v oc2::+Top-Abs_FACE+) (load-time-value (find-class 'topods-face)))
-	       (#.(c++-abi::v oc2::+Top-Abs_WIRE+) (load-time-value (find-class 'oc2::topo-ds_wire)))
-	       (#.(c++-abi::v oc2::+Top-Abs_EDGE+) (load-time-value (find-class 'topods-edge)))
-	       (#.(c++-abi::v oc2::+Top-Abs_VERTEX+) (load-time-value (find-class 'oc2::topo-ds_vertex)))
-	       (#.(c++-abi::v oc2::+Top-Abs_SHAPE+) (load-time-value (find-class 'oc2::topo-ds_shape)))))
-	   (shape (when shape-class (change-class shape shape-class))))
-      (when shape-class
-	shape))))
+
+
+
